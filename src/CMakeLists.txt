@@ -99,9 +99,13 @@ message(STATUS "WMBasicDataLocation.hpp: ${WMBASICDATALOCATION}")
 configure_file(${PROJECT_SOURCE_DIR}/src/WMBasicDataLocation.hpp.in
                ${PROJECT_BINARY_DIR}/src/WMBasicDataLocation.hpp @ONLY)
 
-# Configuration file
+# Configuration files
 configure_file(${PROJECT_SOURCE_DIR}/src/Configuration.hpp.in
                ${PROJECT_BINARY_DIR}/src/Configuration.hpp @ONLY)
+configure_file(${PROJECT_SOURCE_DIR}/src/ConfigurationInfo.cpp.in
+               ${PROJECT_BINARY_DIR}/src/ConfigurationInfo.cpp @ONLY)
+configure_file(${PROJECT_SOURCE_DIR}/src/ConfigurationInfo.hpp.in
+               ${PROJECT_BINARY_DIR}/src/ConfigurationInfo.hpp @ONLY)
 
 set(CMACIONIZE_SOURCES
     AsciiFileDensityFunction.cpp
@@ -109,11 +113,10 @@ set(CMACIONIZE_SOURCES
     CartesianDensityGrid.cpp
     ChargeTransferRates.cpp
     CMacIonize.cpp
-    CMacIonizeSnapshotDensityFunction.cpp
-    CMacIonizeVoronoiGeneratorDistribution.cpp
     CommandLineOption.cpp
     CommandLineParser.cpp
     CompilerInfo.cpp.in
+    ConfigurationInfo.cpp.in
     DensityGrid.cpp
     EmissivityCalculator.cpp
     FaucherGiguerePhotonSourceSpectrum.cpp
@@ -149,6 +152,7 @@ set(CMACIONIZE_SOURCES
     CMacIonizeSnapshotDensityFunction.hpp
     CMacIonizeVoronoiGeneratorDistribution.hpp
     Configuration.hpp.in
+    ConfigurationInfo.hpp.in
     ContinuousPhotonSourceFactory.hpp
     CoordinateVector.hpp
     CommandLineOption.hpp
@@ -195,6 +199,7 @@ set(CMACIONIZE_SOURCES
     SingleStarPhotonSourceDistribution.hpp
     SpatialAMRRefinementScheme.hpp
     SPHNGSnapshotDensityFunction.hpp
+    SPHVoronoiGeneratorDistribution.hpp
     TemperatureCalculator.hpp
     Timer.hpp
     Utilities.hpp
@@ -210,6 +215,7 @@ set(CMACIONIZE_SOURCES
     Worker.hpp
 
     ${PROJECT_BINARY_DIR}/src/CompilerInfo.cpp
+    ${PROJECT_BINARY_DIR}/src/ConfigurationInfo.cpp
 )
 
 set_source_files_properties(${PROJECT_BINARY_DIR}/src/CompilerInfo.cpp
@@ -218,6 +224,8 @@ set_source_files_properties(${PROJECT_BINARY_DIR}/src/CompilerInfo.cpp
 # add HDF5 dependent sources, if we have found HDF5
 if(HAVE_HDF5)
 list(APPEND CMACIONIZE_SOURCES
+    CMacIonizeSnapshotDensityFunction.cpp
+    CMacIonizeVoronoiGeneratorDistribution.cpp
     FLASHSnapshotDensityFunction.cpp
     GadgetDensityGridWriter.cpp
     GadgetSnapshotDensityFunction.cpp

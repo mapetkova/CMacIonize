@@ -349,6 +349,7 @@ set(TESTGADGETDENSITYGRIDWRITER_SOURCES
     ../src/Timer.hpp
 
     ${PROJECT_BINARY_DIR}/src/CompilerInfo.cpp
+    ${PROJECT_BINARY_DIR}/src/ConfigurationInfo.cpp
 )
 set_source_files_properties(${PROJECT_BINARY_DIR}/src/CompilerInfo.cpp
                             PROPERTIES GENERATED TRUE)
@@ -901,6 +902,15 @@ if(HAVE_MULTIPRECISION)
   add_unit_test(NAME testExactGeometricTests
                 SOURCES ${TESTEXACTGEOMETRICTESTS_SOURCES})
 endif(HAVE_MULTIPRECISION)
+
+## Unit test for HilbertKeyGenerator
+set(TESTHILBERTKEYGENERATOR_SOURCES
+    testHilbertKeyGenerator.cpp
+
+    ../src/HilbertKeyGenerator.hpp
+)
+add_unit_test(NAME testHilbertKeyGenerator
+              SOURCES ${TESTHILBERTKEYGENERATOR_SOURCES})
 
 ### Python module unit tests ###################################################
 macro(add_python_unit_test)

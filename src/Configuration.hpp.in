@@ -53,6 +53,9 @@
  *  makes the code very slow!). */
 #cmakedefine HAVE_OUTPUT_CYCLES
 
+/*! @brief If defined, this system is a POSIX system. */
+#cmakedefine HAVE_POSIX
+
 /*! @brief If defined, lock free operations will be used to update cell counters
  *  (which might or might not speed up the code). */
 #cmakedefine USE_LOCKFREE
@@ -60,6 +63,8 @@
 /*! @brief Maximum number of shared memory threads that can be used on the
  *  system. This variable should be configured at compile time, but for now we
  *  just hardcode its value. */
-#define MAX_NUM_THREADS 128
+// clang-format off
+#define MAX_NUM_THREADS @MAX_NUM_THREADS@
+// clang-format on
 
 #endif // CONFIGURATION_HPP
