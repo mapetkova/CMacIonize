@@ -40,18 +40,16 @@ using namespace std;
  *
  * @param box Box containing the grid.
  * @param ncell Number of cells for each dimension.
- * @param density_function DensityFunction that defines the density field.
  * @param periodic Periodicity flags.
  * @param hydro Hydro flag.
  * @param log Log to write log messages to.
  */
 CartesianDensityGrid::CartesianDensityGrid(Box<> box,
                                            CoordinateVector< int > ncell,
-                                           DensityFunction &density_function,
                                            CoordinateVector< bool > periodic,
                                            bool hydro, Log *log)
-    : DensityGrid(density_function, box, periodic, hydro, log), _box(box),
-      _periodic(periodic), _ncell(ncell), _log(log) {
+    : DensityGrid(box, periodic, hydro, log), _box(box), _periodic(periodic),
+      _ncell(ncell), _log(log) {
 
   if (_log) {
     _log->write_status(
@@ -114,13 +112,9 @@ CartesianDensityGrid::CartesianDensityGrid(Box<> box,
  *   - an initial temperature for the gas of 8,000K.
  *
  * @param parameters ParameterFile to read.
- * @param density_function DensityFunction used to set the densities in each
- * cell.
  * @param log Log to write log messages to.
  */
-CartesianDensityGrid::CartesianDensityGrid(ParameterFile &parameters,
-                                           DensityFunction &density_function,
-                                           Log *log)
+CartesianDensityGrid::CartesianDensityGrid(ParameterFile &parameters, Log *log)
     : CartesianDensityGrid(
           Box<>(parameters.get_physical_vector< QUANTITY_LENGTH >(
                     "densitygrid:box_anchor", "[0. m, 0. m, 0. m]"),
@@ -128,7 +122,6 @@ CartesianDensityGrid::CartesianDensityGrid(ParameterFile &parameters,
                     "densitygrid:box_sides", "[1. m, 1. m, 1. m]")),
           parameters.get_value< CoordinateVector< int > >(
               "densitygrid:ncell", CoordinateVector< int >(64)),
-          density_function,
           parameters.get_value< CoordinateVector< bool > >(
               "densitygrid:periodicity", CoordinateVector< bool >(false)),
           parameters.get_value< bool >("hydro:active", false), log) {}
@@ -137,11 +130,13 @@ CartesianDensityGrid::CartesianDensityGrid(ParameterFile &parameters,
  * @brief Initialize the cells in the grid.
  *
  * @param block Block that should be initialized by this MPI process.
+ * @param density_function DensityFunction to use.
  */
 void CartesianDensityGrid::initialize(
-    std::pair< unsigned long, unsigned long > &block) {
-  DensityGrid::initialize(block);
-  DensityGrid::initialize(block, _density_function);
+    std::pair< unsigned long, unsigned long > &block,
+    DensityFunction &density_function) {
+  DensityGrid::initialize(block, density_function);
+  DensityGrid::set_densities(block, density_function);
 }
 
 /**
@@ -395,6 +390,50 @@ CoordinateVector<> CartesianDensityGrid::get_wall_intersection(
   ds = sqrt(ds);
 
   return next_wall;
+}
+
+/**
+ * @brief Get the total optical depth traversed by the given Photon until it
+ * reaches the boundaries of the simulation box.
+ *
+ * @param photon Photon.
+ * @return Total optical depth along the photon's path before it reaches the
+ * boundaries of the simulation box.
+ */
+double CartesianDensityGrid::integrate_optical_depth(const Photon &photon) {
+
+  double optical_depth = 0.;
+
+  CoordinateVector<> photon_origin = photon.get_position();
+  CoordinateVector<> photon_direction = photon.get_direction();
+
+  // find out in which cell the photon is currently hiding
+  CoordinateVector< int > index = get_cell_indices(photon_origin);
+
+  unsigned int ncell = 0;
+  // while the photon is still in the box
+  while (is_inside(index, photon_origin)) {
+    ++ncell;
+    Box<> cell = get_cell(index);
+
+    double ds;
+    CoordinateVector< char > next_index;
+    CoordinateVector<> next_wall = get_wall_intersection(
+        photon_origin, photon_direction, cell, next_index, ds);
+
+    // get the optical depth of the path from the current photon location to the
+    // cell wall, update S
+    DensityGrid::iterator it(get_long_index(index), *this);
+
+    // Helium abundance. Should be a parameter.
+    optical_depth +=
+        get_optical_depth(ds, it.get_ionization_variables(), photon);
+
+    photon_origin = next_wall;
+    index += next_index;
+  }
+
+  return optical_depth;
 }
 
 /**

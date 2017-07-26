@@ -37,14 +37,16 @@
 #include "DensityGridFactory.hpp"
 #include "DensityGridWriterFactory.hpp"
 #include "DensityMaskFactory.hpp"
+#include "DustSimulation.hpp"
 #include "EmissivityCalculator.hpp"
 #include "FileLog.hpp"
 #include "HydroIntegrator.hpp"
+#include "IonizationPhotonShootJobMarket.hpp"
+#include "IonizationSimulation.hpp"
 #include "IonizationStateCalculator.hpp"
 #include "LineCoolingData.hpp"
 #include "MPICommunicator.hpp"
 #include "ParameterFile.hpp"
-#include "PhotonShootJobMarket.hpp"
 #include "PhotonSource.hpp"
 #include "PhotonSourceDistributionFactory.hpp"
 #include "PhotonSourceSpectrumFactory.hpp"
@@ -74,6 +76,10 @@ int main(int argc, char **argv) {
   MPICommunicator comm(argc, argv);
   bool write_log = (comm.get_rank() == 0);
   bool write_output = (comm.get_rank() == 0);
+
+  if (comm.get_size() > 1) {
+    cmac_error("MPI parallelization is currently broken...");
+  }
 
   Timer programtimer;
 
@@ -118,6 +124,13 @@ int main(int argc, char **argv) {
                     "using a workflow system, to ensure that every remote node "
                     "is running the same code version.",
                     COMMANDLINEOPTION_STRINGARGUMENT);
+  parser.add_option("dusty-radiative-transfer", 0,
+                    "Run a dusty radiative transfer simulation instead of an "
+                    "ionization simulation.",
+                    COMMANDLINEOPTION_NOARGUMENT, "false");
+  parser.add_option("rhd", 0, "Run a radiation hydrodynamics simulation "
+                              "instead of an ionization simulation.",
+                    COMMANDLINEOPTION_NOARGUMENT, "false");
   parser.parse_arguments(argc, argv);
 
   LogLevel loglevel = LOGLEVEL_STATUS;
@@ -203,6 +216,41 @@ int main(int argc, char **argv) {
     }
   }
 
+  // we wait until this point to call DustSimulation (if necessary), so that all
+  // the checks above are also done for DustSimulation
+  if (parser.get_value< bool >("dusty-radiative-transfer")) {
+    if (comm.get_size() > 1) {
+      cmac_error("MPI parallel dusty radiative transfer is not supported!");
+    }
+    return DustSimulation::do_simulation(parser, write_output, programtimer,
+                                         log);
+  }
+
+  if (!parser.get_value< bool >("rhd")) {
+    IonizationSimulation simulation(
+        write_output, parser.get_value< bool >("every-iteration-output"),
+        parser.get_value< int >("threads"),
+        parser.get_value< string >("params"), &comm, log);
+
+    if (parser.get_value< bool >("dry-run")) {
+      if (log) {
+        log->write_warning("Dry run requested. Program will now halt.");
+      }
+      return 0;
+    }
+
+    simulation.initialize();
+    simulation.run();
+
+    programtimer.stop();
+    if (log) {
+      log->write_status("Total program time: ",
+                        Utilities::human_readable_time(programtimer.value()),
+                        ".");
+    }
+    return 0;
+  }
+
   bool every_iteration_output =
       parser.get_value< bool >("every-iteration-output");
 
@@ -245,8 +293,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  DensityGrid *grid =
-      DensityGridFactory::generate(params, *density_function, log);
+  DensityGrid *grid = DensityGridFactory::generate(params, log);
 
   // fifth: construct the stellar sources. These should be stored in a
   // separate StellarSources object with geometrical and physical properties.
@@ -286,8 +333,7 @@ int main(int argc, char **argv) {
                       continuousspectrum, abundances, cross_sections, log);
 
   // set up output
-  DensityGridWriter *writer =
-      DensityGridWriterFactory::generate(params, *grid, log);
+  DensityGridWriter *writer = DensityGridWriterFactory::generate(params, log);
 
   unsigned int nloop =
       params.get_value< unsigned int >("max_number_iterations", 10);
@@ -337,13 +383,21 @@ int main(int argc, char **argv) {
     if (log) {
       log->write_warning("Dry run requested. Program will now halt.");
     }
-    return 0.;
+    return 0;
+  }
+
+  if (log) {
+    log->write_status("Initializing DensityFunction...");
+  }
+  density_function->initialize();
+  if (log) {
+    log->write_status("Done.");
   }
 
   // done writing file, now initialize grid
   std::pair< unsigned long, unsigned long > block =
       comm.distribute_block(0, grid->get_number_of_cells());
-  grid->initialize(block);
+  grid->initialize(block, *density_function);
 
   // grid->initialize initialized:
   // - densities
@@ -360,8 +414,8 @@ int main(int argc, char **argv) {
   //  }
 
   // object used to distribute jobs in a shared memory parallel context
-  WorkDistributor< PhotonShootJobMarket, PhotonShootJob > workdistributor(
-      parser.get_value< int >("threads"));
+  WorkDistributor< IonizationPhotonShootJobMarket, IonizationPhotonShootJob >
+  workdistributor(parser.get_value< int >("threads"));
   const int worksize = workdistributor.get_worksize();
   Timer worktimer;
 
@@ -381,8 +435,8 @@ int main(int argc, char **argv) {
                       workdistributor.get_worksize_string(),
                       " for photon shooting.");
   }
-  PhotonShootJobMarket photonshootjobs(source, random_seed, *grid, 0, 100,
-                                       worksize);
+  IonizationPhotonShootJobMarket photonshootjobs(source, random_seed, *grid, 0,
+                                                 100, worksize);
 
   if (hydro_integrator != nullptr) {
     // initialize the hydro variables (before we write the initial snapshot)
@@ -390,7 +444,7 @@ int main(int argc, char **argv) {
   }
 
   if (write_output) {
-    writer->write(0, params);
+    writer->write(*grid, 0, params);
   }
 
   for (unsigned int istep = 0; istep < numstep; ++istep) {
@@ -420,7 +474,7 @@ int main(int argc, char **argv) {
         lnumphoton = numphoton1;
       }
 
-      grid->reset_grid();
+      grid->reset_grid(*density_function);
       if (log) {
         log->write_status("Start shooting ", lnumphoton, " photons...");
       }
@@ -528,7 +582,7 @@ int main(int argc, char **argv) {
       ++loop;
 
       if (write_output && every_iteration_output && loop < nloop) {
-        writer->write(loop, params);
+        writer->write(*grid, loop, params);
       }
     }
 
@@ -543,7 +597,8 @@ int main(int argc, char **argv) {
       // write snapshot
       if (write_output &&
           hydro_lastsnap * hydro_snaptime < (istep + 1) * hydro_timestep) {
-        writer->write(hydro_lastsnap, params, hydro_lastsnap * hydro_snaptime);
+        writer->write(*grid, hydro_lastsnap, params,
+                      hydro_lastsnap * hydro_snaptime);
         ++hydro_lastsnap;
       }
     }
@@ -552,9 +607,10 @@ int main(int argc, char **argv) {
   // write snapshot
   if (write_output) {
     if (hydro_integrator == nullptr) {
-      writer->write(nloop, params);
+      writer->write(*grid, nloop, params);
     } else {
-      writer->write(hydro_lastsnap, params, hydro_lastsnap * hydro_snaptime);
+      writer->write(*grid, hydro_lastsnap, params,
+                    hydro_lastsnap * hydro_snaptime);
     }
   }
 

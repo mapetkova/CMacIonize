@@ -44,14 +44,13 @@ private:
   unsigned char _padding;
 
 public:
-  GadgetDensityGridWriter(std::string prefix, DensityGrid &grid,
+  GadgetDensityGridWriter(std::string prefix,
                           std::string output_folder = std::string("."),
                           Log *log = nullptr, unsigned char padding = 3);
-  GadgetDensityGridWriter(ParameterFile &params, DensityGrid &grid,
-                          Log *log = nullptr);
+  GadgetDensityGridWriter(ParameterFile &params, Log *log = nullptr);
 
-  virtual void write(unsigned int iteration, ParameterFile &params,
-                     double time = 0.);
+  virtual void write(DensityGrid &grid, unsigned int iteration,
+                     ParameterFile &params, double time = 0.);
 };
 
 #endif // GADGETDENSITYGRIDWRITER_HPP

@@ -29,7 +29,7 @@ macro(add_unit_test)
     set(multiValueArgs SOURCES LIBS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}"
                                "${multiValueArgs}" ${ARGN})
-    message(STATUS "generating " ${TEST_NAME})
+    message(STATUS "generating ${TEST_NAME}")
     add_executable(${TEST_NAME} EXCLUDE_FROM_ALL ${TEST_SOURCES})
     set_target_properties(${TEST_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                           ${PROJECT_BINARY_DIR}/rundir/test)
@@ -911,6 +911,119 @@ set(TESTHILBERTKEYGENERATOR_SOURCES
 )
 add_unit_test(NAME testHilbertKeyGenerator
               SOURCES ${TESTHILBERTKEYGENERATOR_SOURCES})
+
+## Unit test for SpiralGalaxyDensityFunction
+set(TESTSPIRALGALAXYDENSITYFUNCTION_SOURCES
+    testSpiralGalaxyDensityFunction.cpp
+
+    ../src/AsciiFileDensityGridWriter.cpp
+    ../src/CartesianDensityGrid.cpp
+    ../src/DensityGrid.cpp
+    ../src/ParameterFile.cpp
+    ../src/SpiralGalaxyDensityFunction.hpp
+)
+add_unit_test(NAME testSpiralGalaxyDensityFunction
+              SOURCES ${TESTSPIRALGALAXYDENSITYFUNCTION_SOURCES})
+
+## Unit test for SpiralGalaxyContinuousPhotonSource
+set(TESTSPIRALGALAXYCONTINUOUSPHOTONSOURCE_SOURCES
+    testSpiralGalaxyContinuousPhotonSource.cpp
+
+    ../src/SpiralGalaxyContinuousPhotonSource.hpp
+)
+add_unit_test(NAME testSpiralGalaxyContinuousPhotonSource
+              SOURCES ${TESTSPIRALGALAXYCONTINUOUSPHOTONSOURCE_SOURCES})
+
+## Unit test for CCDImage
+set(TESTCCDIMAGE_SOURCES
+    testCCDImage.cpp
+
+    ../src/CCDImage.hpp
+)
+add_unit_test(NAME testCCDImage
+              SOURCES ${TESTCCDIMAGE_SOURCES})
+
+## Unit test for DustSimulation
+set(TESTDUSTSIMULATION_SOURCES
+    testDustSimulation.cpp
+
+    ../src/CartesianDensityGrid.cpp
+    ../src/CommandLineOption.cpp
+    ../src/CommandLineParser.cpp
+    ../src/DensityGrid.cpp
+    ../src/DustScattering.cpp
+    ../src/DustScattering.hpp
+    ../src/DustSimulation.cpp
+    ../src/DustSimulation.hpp
+    ../src/HeliumLymanContinuumSpectrum.cpp
+    ../src/HeliumTwoPhotonContinuumSpectrum.cpp
+    ../src/HydrogenLymanContinuumSpectrum.cpp
+    ../src/ParameterFile.cpp
+    ../src/PhotonSource.cpp
+    ../src/VernerCrossSections.cpp
+)
+add_unit_test(NAME testDustSimulation
+              SOURCES ${TESTDUSTSIMULATION_SOURCES})
+configure_file(${PROJECT_SOURCE_DIR}/test/test_dustsimulation.param
+               ${PROJECT_BINARY_DIR}/rundir/test/test_dustsimulation.param
+               COPYONLY)
+
+## Unit test for IonizationSimulation
+set(TESTIONIZATIONSIMULATION_SOURCES
+    testIonizationSimulation.cpp
+)
+add_unit_test(NAME testIonizationSimulation
+              SOURCES ${TESTIONIZATIONSIMULATION_SOURCES}
+              LIBS IonizationSimulation)
+configure_file(${PROJECT_SOURCE_DIR}/test/test_ionizationsimulation.param
+               ${PROJECT_BINARY_DIR}/rundir/test/test_ionizationsimulation.param
+               COPYONLY)
+
+## Unit test for SPHArrayDensityFunction
+set(TESTSPHARRAYDENSITYFUNCTION_SOURCES
+    testSPHArrayDensityFunction.cpp
+
+    ../src/AsciiFileDensityGridWriter.cpp
+    ../src/CartesianDensityGrid.cpp
+    ../src/DensityGrid.cpp
+    ../src/SPHArrayDensityFunction.cpp
+    ../src/SPHArrayDensityFunction.hpp
+)
+add_unit_test(NAME testSPHArrayDensityFunction
+              SOURCES ${TESTSPHARRAYDENSITYFUNCTION_SOURCES})
+
+## Unit test for CMILibrary
+set(TESTCMILIBRARY_SOURCES
+    testCMILibrary.cpp
+)
+add_unit_test(NAME testCMILibrary
+              SOURCES ${TESTCMILIBRARY_SOURCES}
+              LIBS CMILibrary)
+configure_file(${PROJECT_SOURCE_DIR}/test/test_CMI_library.param
+               ${PROJECT_BINARY_DIR}/rundir/test/test_CMI_library.param
+               COPYONLY)
+
+## Unit test for SPHArrayDensityGridWriter
+set(TESTSPHARRAYDENSITYGRIDWRITER_SOURCES
+    testSPHArrayDensityGridWriter.cpp
+
+    ../src/CartesianDensityGrid.cpp
+    ../src/DensityGrid.cpp
+    ../src/SPHArrayDensityGridWriter.cpp
+    ../src/SPHArrayDensityGridWriter.hpp
+)
+add_unit_test(NAME testSPHArrayDensityGridWriter
+              SOURCES ${TESTSPHARRAYDENSITYGRIDWRITER_SOURCES})
+
+## Unit test for CMIFortranLibrary
+if(HAVE_FORTRAN)
+  set(TESTCMIFORTRANLIBRARY_SOURCES
+      testCMIFortranLibrary.f90
+  )
+  add_unit_test(NAME testCMIFortranLibrary
+                SOURCES ${TESTCMIFORTRANLIBRARY_SOURCES}
+                LIBS CMIFortranLibrary)
+endif(HAVE_FORTRAN)
 
 ### Python module unit tests ###################################################
 macro(add_python_unit_test)

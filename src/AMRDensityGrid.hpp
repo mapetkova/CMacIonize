@@ -32,6 +32,7 @@
 #include "DensityGrid.hpp"
 #include "ParameterFile.hpp"
 
+#include <algorithm>
 #include <cfloat>
 #include <ostream>
 #include <vector>
@@ -218,7 +219,6 @@ public:
    *
    * @param box Box containing the grid.
    * @param ncell Number of cells in the low resolution grid.
-   * @param density_function DensityFunction that defines the density field.
    * @param refinement_scheme Refinement scheme used to refine cells. Memory
    * management for this pointer is taken over by this class.
    * @param refinement_interval Number of grid resets before the grid is
@@ -229,12 +229,11 @@ public:
    */
   inline AMRDensityGrid(
       Box<> box, CoordinateVector< int > ncell,
-      DensityFunction &density_function,
       AMRRefinementScheme *refinement_scheme = nullptr,
       unsigned char refinement_interval = 5,
       CoordinateVector< bool > periodic = CoordinateVector< bool >(false),
       bool hydro = false, Log *log = nullptr)
-      : DensityGrid(density_function, box, periodic, hydro, log),
+      : DensityGrid(box, periodic, hydro, log),
         _refinement_scheme(refinement_scheme),
         _refinement_interval(refinement_interval), _reset_count(0) {
 
@@ -264,7 +263,7 @@ public:
     // index values
     _cells.resize(_grid.get_number_of_cells());
     unsigned int index = 0;
-    unsigned long key = _grid.get_first_key();
+    uint64_t key = _grid.get_first_key();
     while (key != _grid.get_max_key()) {
       _cells[index] = &_grid[key];
       _cells[index]->value() = index;
@@ -290,12 +289,9 @@ public:
    * @brief ParameterFile constructor.
    *
    * @param params ParameterFile to read.
-   * @param density_function DensityFunction used to set the densities in each
-   * cell.
    * @param log Log to write log messages to.
    */
-  inline AMRDensityGrid(ParameterFile &params,
-                        DensityFunction &density_function, Log *log)
+  inline AMRDensityGrid(ParameterFile &params, Log *log)
       : AMRDensityGrid(
             Box<>(params.get_physical_vector< QUANTITY_LENGTH >(
                       "densitygrid:box_anchor", "[0. m, 0. m, 0. m]"),
@@ -303,7 +299,7 @@ public:
                       "densitygrid:box_sides", "[1. m, 1. m, 1. m]")),
             params.get_value< CoordinateVector< int > >(
                 "densitygrid:ncell", CoordinateVector< int >(64)),
-            density_function, AMRRefinementSchemeFactory::generate(params, log),
+            AMRRefinementSchemeFactory::generate(params, log),
             params.get_value< unsigned char >("densitygrid:refinement_interval",
                                               5),
             params.get_value< CoordinateVector< bool > >(
@@ -325,10 +321,12 @@ public:
    * @brief Initialize the cells of the grid.
    *
    * @param block Block that should be initialized by this MPI process.
+   * @param density_function DensityFunction to use.
    */
-  virtual void initialize(std::pair< unsigned long, unsigned long > &block) {
-    DensityGrid::initialize(block);
-    DensityGrid::initialize(block, _density_function);
+  virtual void initialize(std::pair< unsigned long, unsigned long > &block,
+                          DensityFunction &density_function) {
+    DensityGrid::initialize(block, density_function);
+    DensityGrid::set_densities(block, density_function);
 
     // apply mesh refinement
     if (_refinement_scheme) {
@@ -342,7 +340,7 @@ public:
       // within the refinement routine
       const unsigned int cell2size = _cells.size();
       for (unsigned int i = 0; i < cell2size; ++i) {
-        refine_cell(*_refinement_scheme, i, _density_function);
+        refine_cell(*_refinement_scheme, i, density_function);
       }
 
       if (_log) {
@@ -359,14 +357,17 @@ public:
     // function, as it is also used in reset_grid()
     // at this point, we want to read all values from the density function,
     // since it also contains the initial temperature etc.
-    DensityGrid::initialize(block, _density_function);
+    DensityGrid::set_densities(block, density_function);
   }
 
   /**
    * @brief Reset the mean intensity counters, update the reemission
    * probabilities, and reapply the refinement scheme to all cells.
+   *
+   * @param density_function DensityFunction to use to set the density in newly
+   * created cells.
    */
-  virtual void reset_grid() {
+  virtual void reset_grid(DensityFunction &density_function) {
     if (_log) {
       _log->write_status("Resetting grid...");
     }
@@ -378,7 +379,7 @@ public:
     if (_refinement_scheme != nullptr && _reset_count >= _refinement_interval) {
       const unsigned int cells2size = _cells.size();
       for (unsigned int i = 0; i < cells2size; ++i) {
-        refine_cell(*_refinement_scheme, i, _density_function);
+        refine_cell(*_refinement_scheme, i, density_function);
       }
 
       if (_log) {
@@ -391,7 +392,7 @@ public:
     }
 
     // make sure all cells are correctly reset (also the new ones, if any)
-    DensityGrid::reset_grid();
+    DensityGrid::reset_grid(density_function);
   }
 
   /**
@@ -607,6 +608,19 @@ public:
     cell = next_cell;
 
     return next_wall;
+  }
+
+  /**
+   * @brief Get the total optical depth traversed by the given Photon until it
+   * reaches the boundaries of the simulation box.
+   *
+   * @param photon Photon.
+   * @return Total optical depth along the photon's path before it reaches the
+   * boundaries of the simulation box.
+   */
+  virtual double integrate_optical_depth(const Photon &photon) {
+    cmac_error("This function is not implemented (yet)!");
+    return 0.;
   }
 
   /**
