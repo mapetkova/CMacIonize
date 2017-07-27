@@ -1,6 +1,6 @@
 ################################################################################
 # This file is part of CMacIonize
-# Copyright (C) 2017 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
+# Copyright (C) 2016 Bert Vandenbroucke (bert.vandenbroucke@gmail.com)
 #
 # CMacIonize is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -16,26 +16,21 @@
 # along with CMacIonize. If not, see <http://www.gnu.org/licenses/>.
 ################################################################################
 
-set(LIBCMIFORTRANLIBRARY_SOURCES
-    cmi_fortran_library.f90
-)
-
-add_library(CMIFortranLibrary ${LIBCMIFORTRANLIBRARY_SOURCES})
-target_link_libraries(CMIFortranLibrary CMILibrary)
+# Copy the library header file
+configure_file(${PROJECT_SOURCE_DIR}/c/cmi_c_library.h
+               ${PROJECT_BINARY_DIR}/include/cmi_c_library.h COPYONLY)
 
 # Create files that contain the necessary includes and linker dependencies to
-# compile a program that uses the CMI Fortran library
+# compile a program that uses the CMI C library
 # An example compilation could look like this:
-# gcc -o test `cat ${PROJECT_BINARY_DIR}/compilation/cmi_fortran_includes.txt` \
-#   test.c `cat ${PROJECT_BINARY_DIR}/compilation/cmi_fortran_libs.txt`
+#  gcc -o test `cat ${PROJECT_BINARY_DIR}/compilation/cmi_c_includes.txt` \
+#    test.c `cat ${PROJECT_BINARY_DIR}/compilation/cmi_c_libs.txt`
 find_package(PkgConfig)
 if(PKG_CONFIG_FOUND)
-  pkg_check_modules(FortranLIBS hdf5 mpi-cxx)
-  string(REPLACE ";" " " FortranLIBS_LDFLAGS_STRING
-                 "${FortranLIBS_STATIC_LDFLAGS}")
-  configure_file(${PROJECT_SOURCE_DIR}/fortran/cmi_fortran_libs.txt
-                 ${PROJECT_BINARY_DIR}/compilation/cmi_fortran_libs.txt @ONLY)
-  configure_file(${PROJECT_SOURCE_DIR}/fortran/cmi_fortran_includes.txt
-                 ${PROJECT_BINARY_DIR}/compilation/cmi_fortran_includes.txt
-                 @ONLY)
+  pkg_check_modules(CLIBS hdf5 mpi-cxx)
+  string(REPLACE ";" " " CLIBS_LDFLAGS_STRING "${CLIBS_STATIC_LDFLAGS}")
+  configure_file(${PROJECT_SOURCE_DIR}/c/cmi_c_libs.txt
+                 ${PROJECT_BINARY_DIR}/compilation/cmi_c_libs.txt @ONLY)
+  configure_file(${PROJECT_SOURCE_DIR}/c/cmi_c_includes.txt
+                 ${PROJECT_BINARY_DIR}/compilation/cmi_c_includes.txt @ONLY)
 endif(PKG_CONFIG_FOUND)
