@@ -73,16 +73,26 @@ public:
    * @brief Generate a VoronoiGeneratorDistribution based on the parameters in
    * the given ParameterFile.
    *
+   * Supported types are (default: UniformRandom):
+   *  - PerturbedCartesian: Regular Cartesian grid with small random
+   *    displacements
+   *  - UniformRandom: Uniform random generator positions
+   *  - UniformRegular: Regular Cartesian grid
+   *  - SPH: Generator positions based on an input file
+   *  - CMacIonize: Implementation hack to reconstruct a grid from a snapshot
+   *
+   * @param simulation_box Simulation box (in m).
    * @param params ParameterFile to read from.
    * @param log Log to write logging info to.
    * @return Pointer to a newly created VoronoiGeneratorDistribution instance.
    * Memory management for this pointer should be done by the calling routine.
    */
-  inline static VoronoiGeneratorDistribution *generate(ParameterFile &params,
-                                                       Log *log = nullptr) {
+  inline static VoronoiGeneratorDistribution *
+  generate(const Box<> &simulation_box, ParameterFile &params,
+           Log *log = nullptr) {
 
-    std::string type = params.get_value< std::string >(
-        "densitygrid:voronoi_generator_distribution:type", "UniformRandom");
+    const std::string type = params.get_value< std::string >(
+        "DensityGrid:VoronoiGeneratorDistribution:type", "UniformRandom");
 
     if (log) {
       log->write_info("Requested VoronoiGeneratorDistribution type: ", type);
@@ -93,16 +103,20 @@ public:
 #endif
 
     if (type == "PerturbedCartesian") {
-      return new PerturbedCartesianVoronoiGeneratorDistribution(params, log);
+      return new PerturbedCartesianVoronoiGeneratorDistribution(simulation_box,
+                                                                params, log);
     } else if (type == "UniformRandom") {
-      return new UniformRandomVoronoiGeneratorDistribution(params, log);
+      return new UniformRandomVoronoiGeneratorDistribution(simulation_box,
+                                                           params, log);
     } else if (type == "UniformRegular") {
-      return new UniformRegularVoronoiGeneratorDistribution(params, log);
-    } else if (type == "SPH") {                                // Maya
-      return new SPHVoronoiGeneratorDistribution(params, log); // Maya
+      return new UniformRegularVoronoiGeneratorDistribution(simulation_box,
+                                                            params, log);
+    } else if (type == "SPH") {
+      // added by Maya
+      return new SPHVoronoiGeneratorDistribution(simulation_box, params, log);
 #ifdef HAVE_HDF5
     } else if (type == "CMacIonize") {
-      return new CMacIonizeVoronoiGeneratorDistribution(params);
+      return new CMacIonizeVoronoiGeneratorDistribution(simulation_box, params);
 #endif
 
     } else {

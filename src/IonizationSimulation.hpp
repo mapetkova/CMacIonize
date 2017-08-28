@@ -32,22 +32,21 @@
 #include "LineCoolingData.hpp"
 #include "ParameterFile.hpp"
 #include "Timer.hpp"
-#include "VernerCrossSections.hpp"
-#include "VernerRecombinationRates.hpp"
 
 #include <string>
 
+class ContinuousPhotonSource;
+class CrossSections;
 class DensityFunction;
 class DensityGrid;
+class DensityGridWriter;
 class DensityMask;
 class Log;
 class MPICommunicator;
+class PhotonSource;
 class PhotonSourceDistribution;
 class PhotonSourceSpectrum;
-class ContinuousPhotonSource;
-class PhotonSource;
-class DensityGridWriter;
-class IonizationStateCalculator;
+class RecombinationRates;
 class TemperatureCalculator;
 
 /**
@@ -80,16 +79,10 @@ private:
       _work_distributor;
 
   /*! @brief Data values for line cooling. */
-  LineCoolingData _line_cooling_data;
-
-  /*! @brief Cross sections for photoionization. */
-  VernerCrossSections _cross_sections;
-
-  /*! @brief Recombination rates. */
-  VernerRecombinationRates _recombination_rates;
+  const LineCoolingData _line_cooling_data;
 
   /*! @brief Charge transfer rates. */
-  ChargeTransferRates _charge_transfer_rates;
+  const ChargeTransferRates _charge_transfer_rates;
 
   /// parameter file
 
@@ -119,10 +112,16 @@ private:
   /// non pointer objects owned by the simulation
 
   /*! @brief Abundances. */
-  Abundances _abundances;
+  const Abundances _abundances;
 
   /// pointer objects owned by the simulation. These have to be deleted in the
   /// destructor.
+
+  /*! @brief Cross sections for photoionization. */
+  CrossSections *_cross_sections;
+
+  /*! @brief Recombination rates. */
+  RecombinationRates *_recombination_rates;
 
   /*! @brief Density function that sets the density field. */
   DensityFunction *_density_function;
@@ -151,10 +150,6 @@ private:
 
   /*! @brief Object used to write snapshot output. */
   DensityGridWriter *_density_grid_writer;
-
-  /*! @brief Object used to compute the ionization balance at the end of a
-   *  ray tracing step. */
-  IonizationStateCalculator *_ionization_state_calculator;
 
   /*! @brief Object used to compute the combined ionization and temperature
    *  balance at the end of a ray tracing step. */

@@ -19,14 +19,6 @@
 # Rules for files that need to be configured.
 message(STATUS "Configuring external data files...")
 
-# LineCoolingDataLocation.hpp
-configure_file(${PROJECT_SOURCE_DIR}/data/atom4.dat
-               ${PROJECT_BINARY_DIR}/data/atom4.dat COPYONLY)
-set(LINECOOLINGDATALOCATION ${PROJECT_BINARY_DIR}/data/atom4.dat)
-message(STATUS "LineCoolingDataLocation.hpp: ${LINECOOLINGDATALOCATION}")
-configure_file(${PROJECT_SOURCE_DIR}/src/LineCoolingDataLocation.hpp.in
-               ${PROJECT_BINARY_DIR}/src/LineCoolingDataLocation.hpp @ONLY)
-
 # VernerCrossSectionsDataLocation.hpp
 configure_file(${PROJECT_SOURCE_DIR}/data/verner_A.dat
                ${PROJECT_BINARY_DIR}/data/verner_A.dat COPYONLY)
@@ -53,17 +45,6 @@ message(STATUS
 configure_file(
     ${PROJECT_SOURCE_DIR}/src/VernerRecombinationRatesDataLocation.hpp.in
     ${PROJECT_BINARY_DIR}/src/VernerRecombinationRatesDataLocation.hpp
-               @ONLY)
-
-# ChargeTransferRatesDataLocation.hpp
-configure_file(${PROJECT_SOURCE_DIR}/data/KingdonFerland_ct1data.txt
-               ${PROJECT_BINARY_DIR}/data/KingdonFerland_ct1data.txt COPYONLY)
-set(CHARGETRANSFERRATESDATALOCATION
-    ${PROJECT_BINARY_DIR}/data/KingdonFerland_ct1data.txt)
-message(STATUS
-      "ChargeTransferRatesDataLocation.hpp: ${CHARGETRANSFERRATESDATALOCATION}")
-configure_file(${PROJECT_SOURCE_DIR}/src/ChargeTransferRatesDataLocation.hpp.in
-               ${PROJECT_BINARY_DIR}/src/ChargeTransferRatesDataLocation.hpp
                @ONLY)
 
 # HeliumTwoPhotonContinuumDataLocation.hpp
@@ -113,6 +94,7 @@ set(LIBIONIZATIONSIMULATION_SOURCES
     CartesianDensityGrid.cpp
     ChargeTransferRates.cpp
     DensityGrid.cpp
+    DiffuseReemissionHandler.cpp
     FaucherGiguerePhotonSourceSpectrum.cpp
     HeliumLymanContinuumSpectrum.cpp
     HeliumTwoPhotonContinuumSpectrum.cpp
@@ -159,6 +141,7 @@ set(CMACIONIZE_SOURCES
     DustScattering.cpp
     DustSimulation.cpp
     EmissivityCalculator.cpp
+    RadiationHydrodynamicsSimulation.cpp
 
     Abundances.hpp
     AMRRefinementScheme.hpp
@@ -168,7 +151,6 @@ set(CMACIONIZE_SOURCES
     Box.hpp
     CartesianDensityGrid.hpp
     ChargeTransferRates.hpp
-    ChargeTransferRatesDataLocation.hpp.in
     CMacIonizeSnapshotDensityFunction.hpp
     CMacIonizeVoronoiGeneratorDistribution.hpp
     Configuration.hpp.in
@@ -179,6 +161,7 @@ set(CMACIONIZE_SOURCES
     CommandLineParser.hpp
     CompilerInfo.hpp
     CrossSections.hpp
+    CrossSectionsFactory.hpp
     DensityFunction.hpp
     DensityFunctionFactory.hpp
     DensityGrid.hpp
@@ -195,6 +178,8 @@ set(CMACIONIZE_SOURCES
     EmissivityValues.hpp
     Error.hpp
     FaucherGiguerePhotonSourceSpectrum.hpp
+    FixedValueCrossSections.hpp
+    FixedValueRecombinationRates.hpp
     HydrogenLymanContinuumSpectrum.hpp
     HeliumLymanContinuumSpectrum.hpp
     HeliumTwoPhotonContinuumSpectrum.hpp
@@ -203,7 +188,6 @@ set(CMACIONIZE_SOURCES
     IonizationPhotonShootJobMarket.hpp
     IonizationStateCalculator.hpp
     LineCoolingData.hpp
-    LineCoolingDataLocation.hpp.in
     Lock.hpp
     MonochromaticPhotonSourceSpectrum.hpp
     MPICommunicator.hpp
@@ -216,9 +200,13 @@ set(CMACIONIZE_SOURCES
     PhotonSourceDistributionFactory.hpp
     PhotonSourceSpectrum.hpp
     PhotonSourceSpectrumFactory.hpp
+    PhysicalConstants.hpp
     PlanckPhotonSourceSpectrum.hpp
+    RadiationHydrodynamicsSimulation.hpp
     RecombinationRates.hpp
+    RecombinationRatesFactory.hpp
     SILCCPhotonSourceDistribution.hpp
+    SimulationBox.hpp
     SingleStarPhotonSourceDistribution.hpp
     SpatialAMRRefinementScheme.hpp
     SPHNGSnapshotDensityFunction.hpp

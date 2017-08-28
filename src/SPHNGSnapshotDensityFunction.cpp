@@ -84,16 +84,17 @@ double SPHNGSnapshotDensityFunction::kernel(const double q, const double h) {
  * @param stats_maxdist Maximum interneighbour distance bin (in m).
  * @param stats_filename Name of the file with neighbour statistics that will be
  * written out.
+ * @param use_new_algorithm Use the new mapping algorithm?
  * @param log Log to write logging info to.
  */
 SPHNGSnapshotDensityFunction::SPHNGSnapshotDensityFunction(
     std::string filename, double initial_temperature, bool write_stats,
     unsigned int stats_numbin, double stats_mindist, double stats_maxdist,
-    std::string stats_filename, Log *log)
-    : _octree(nullptr), _initial_temperature(initial_temperature),
-      _stats_numbin(stats_numbin), _stats_mindist(stats_mindist),
-      _stats_maxdist(stats_maxdist), _stats_filename(stats_filename),
-      _log(log) {
+    std::string stats_filename, bool use_new_algorithm, Log *log)
+    : _use_new_algorithm(use_new_algorithm), _octree(nullptr),
+      _initial_temperature(initial_temperature), _stats_numbin(stats_numbin),
+      _stats_mindist(stats_mindist), _stats_maxdist(stats_maxdist),
+      _stats_filename(stats_filename), _log(log) {
   std::ifstream file(filename, std::ios::binary | std::ios::in);
 
   if (!file) {
@@ -382,24 +383,41 @@ SPHNGSnapshotDensityFunction::SPHNGSnapshotDensityFunction(
 /**
  * @brief ParameterFile constructor.
  *
+ * Parameters are:
+ *  - filename: Name fo the snapshot file (required)
+ *  - initial temperature: Initial temperature of the gas (default: 8000. K)
+ *  - write statistics: Write statistical information about the number of close
+ *    particle pairs (default: false)?
+ *  - statistics number of bins: Number of bins to use when binning the
+ *    interparticle distances (default: 200)
+ *  - statistics minimum distance: Minimum interparticle distance bin (default:
+ *    1.e-5 m)
+ *  - statistics maximum distance: Maximum interparticle distance bin (default:
+ *    1. kpc)
+ *  - statistics filename: Name of the output file containing the statistics
+ *    (default: ngb_statistics.txt)
+ *  - use new algorithm: Use Maya Petkova's more accurate mapping algorithm
+ *    (default: false)?
+ *
  * @param params ParameterFile to read from.
  * @param log Log to write logging info to.
  */
 SPHNGSnapshotDensityFunction::SPHNGSnapshotDensityFunction(
     ParameterFile &params, Log *log)
     : SPHNGSnapshotDensityFunction(
-          params.get_value< std::string >("densityfunction:filename"),
+          params.get_value< std::string >("DensityFunction:filename"),
           params.get_physical_value< QUANTITY_TEMPERATURE >(
-              "densityfunction:initial_temperature", "8000. K"),
-          params.get_value< bool >("densityfunction:write_statistics", false),
+              "DensityFunction:initial temperature", "8000. K"),
+          params.get_value< bool >("DensityFunction:write statistics", false),
           params.get_value< unsigned int >(
-              "densityfunction:statistics_number_of_bins", 200),
+              "DensityFunction:statistics number of bins", 200),
           params.get_physical_value< QUANTITY_LENGTH >(
-              "densityfunction:statistics_minimum_distance", "1.e-5 m"),
+              "DensityFunction:statistics minimum distance", "1.e-5 m"),
           params.get_physical_value< QUANTITY_LENGTH >(
-              "densityfunction:statistics_maximum_distance", "1. kpc"),
-          params.get_value< std::string >("densityfunction:statistics_filename",
+              "DensityFunction:statistics maximum distance", "1. kpc"),
+          params.get_value< std::string >("DensityFunction:statistics filename",
                                           "ngb_statistics.txt"),
+          params.get_value< bool >("DensityFunction:use new algorithm", false),
           log) {}
 
 /**
@@ -873,49 +891,79 @@ double SPHNGSnapshotDensityFunction::mass_contribution(
  * @return Initial physical field values for that cell.
  */
 DensityValues SPHNGSnapshotDensityFunction::operator()(const Cell &cell) const {
+
   DensityValues values;
 
-  CoordinateVector<> position = cell.get_cell_midpoint();
+  if (_use_new_algorithm) {
 
-  // Find the vetex that is furthest away from the cell midpoint.
-  std::vector< Face > face_vector = cell.get_faces();
-  double radius = 0.0;
-  for (unsigned int i = 0; i < face_vector.size(); i++) {
-    for (Face::Vertices j = face_vector[i].first_vertex();
-         j != face_vector[i].last_vertex(); ++j) {
-      double distance = j.get_position().norm();
-      if (distance > radius)
-        radius = distance;
+    CoordinateVector<> position = cell.get_cell_midpoint();
+
+    // Find the vertex that is furthest away from the cell midpoint.
+    std::vector< Face > face_vector = cell.get_faces();
+    double radius = 0.0;
+    for (unsigned int i = 0; i < face_vector.size(); i++) {
+      for (Face::Vertices j = face_vector[i].first_vertex();
+           j != face_vector[i].last_vertex(); ++j) {
+        double distance = j.get_position().norm();
+        if (distance > radius)
+          radius = distance;
+      }
     }
+
+    // Find the neighbours that are contained inside of a sphere of centre the
+    // cell midpoint
+    // and radius given by the distance to the furthest vertex.
+    std::vector< unsigned int > ngbs =
+        _octree->get_ngbs_sphere(position, radius);
+    const unsigned int numngbs = ngbs.size();
+
+    double density = 0.;
+
+    // Loop over all the neighbouring particles and calculate their mass
+    // contributions.
+    for (unsigned int i = 0; i < numngbs; i++) {
+      const unsigned int index = ngbs[i];
+      const double h = _smoothing_lengths[index];
+      const CoordinateVector<> particle = _positions[index];
+      density += mass_contribution(cell, particle, h) * _masses[index];
+    }
+
+    // Divide the cell mass by the cell volume to get density.
+    density = density / cell.get_volume();
+
+    // convert density to particle density (assuming hydrogen only)
+    values.set_number_density(density / 1.6737236e-27);
+    // TODO: other quantities
+    // temporary values
+    values.set_temperature(_initial_temperature);
+    values.set_ionic_fraction(ION_H_n, 1.e-6);
+    values.set_ionic_fraction(ION_He_n, 1.e-6);
+
+  } else {
+
+    const CoordinateVector<> position = cell.get_cell_midpoint();
+
+    double density = 0.;
+    std::vector< unsigned int > ngbs = _octree->get_ngbs(position);
+    const unsigned int numngbs = ngbs.size();
+    for (unsigned int i = 0; i < numngbs; ++i) {
+      const unsigned int index = ngbs[i];
+      const double r = (position - _positions[index]).norm();
+      const double h = _smoothing_lengths[index];
+      const double q = r / h;
+      const double m = _masses[index];
+      const double splineval = m * kernel(q, h);
+      density += splineval;
+    }
+
+    // convert density to particle density (assuming hydrogen only)
+    values.set_number_density(density / 1.6737236e-27);
+    // TODO: other quantities
+    // temporary values
+    values.set_temperature(_initial_temperature);
+    values.set_ionic_fraction(ION_H_n, 1.e-6);
+    values.set_ionic_fraction(ION_He_n, 1.e-6);
   }
-
-  // Find the neighbours that are contained inside of a sphere of centre the
-  // cell midpoint
-  // and radius given by the distance to the furthest vertex.
-  std::vector< unsigned int > ngbs = _octree->get_ngbs_sphere(position, radius);
-  const unsigned int numngbs = ngbs.size();
-
-  double density = 0.;
-
-  // Loop over all the neighbouring particles and calculate their mass
-  // contributions.
-  for (unsigned int i = 0; i < numngbs; i++) {
-    const unsigned int index = ngbs[i];
-    const double h = _smoothing_lengths[index];
-    const CoordinateVector<> particle = _positions[index];
-    density += mass_contribution(cell, particle, h) * _masses[index];
-  }
-
-  // Divide the cell mass by the cell volume to get density.
-  density = density / cell.get_volume();
-
-  // convert density to particle density (assuming hydrogen only)
-  values.set_number_density(density / 1.6737236e-27);
-  // TODO: other quantities
-  // temporary values
-  values.set_temperature(_initial_temperature);
-  values.set_ionic_fraction(ION_H_n, 1.e-6);
-  values.set_ionic_fraction(ION_He_n, 1.e-6);
 
   return values;
 }

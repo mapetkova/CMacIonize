@@ -61,16 +61,17 @@ public:
   /**
    * @brief Constructor.
    *
-   * @param box Box containing the generators (in m).
+   * @param simulation_box Simulation box (in m).
    * @param number_of_positions Number of SPH generator positions to
    * generate.
    * @param filename Name of the ASCII text file to read.
    * @param log Log to write logging info to.
    */
-  SPHVoronoiGeneratorDistribution(Box<> box, unsigned int number_of_positions,
+  SPHVoronoiGeneratorDistribution(const Box<> &simulation_box,
+                                  unsigned int number_of_positions,
                                   std::string filename, Log *log = nullptr)
       : _number_of_positions(number_of_positions), _current_number(0),
-        _box(box), _filename(filename) {
+        _box(simulation_box), _filename(filename) {
 
     _generator_positions.resize(number_of_positions);
 
@@ -117,21 +118,23 @@ public:
   /**
    * @brief ParameterFile constructor.
    *
+   * Parameters are:
+   *  - number of positions: Number of positions in the file (default: 1000)
+   *  - filename: Name of the file (default: SPH.txt)
+   *
+   * @param simulation_box Simulation box (in m).
    * @param params ParameterFile to read from.
    * @param log Log to write logging info to.
    */
-  SPHVoronoiGeneratorDistribution(ParameterFile &params, Log *log = nullptr)
+  SPHVoronoiGeneratorDistribution(const Box<> &simulation_box,
+                                  ParameterFile &params, Log *log = nullptr)
       : SPHVoronoiGeneratorDistribution(
-            Box<>(params.get_physical_vector< QUANTITY_LENGTH >(
-                      "densitygrid:box_anchor", "[0. m, 0. m, 0. m]"),
-                  params.get_physical_vector< QUANTITY_LENGTH >(
-                      "densitygrid:box_sides", "[1. m, 1. m, 1. m]")),
-            params.get_value< unsigned int >("densitygrid:voronoi_generator_"
-                                             "distribution:number_of_positions",
-                                             1000),
-            params.get_value< std::string >("densitygrid:voronoi_generator_"
-                                            "distribution:file_name",
-                                            "SPH.txt"),
+            simulation_box,
+            params.get_value< unsigned int >(
+                "DensityGrid:VoronoiGeneratorDistribution:number of positions",
+                1000),
+            params.get_value< std::string >(
+                "DensityGrid:VoronoiGeneratorDistribution:filename", "SPH.txt"),
             log) {}
 
   /**

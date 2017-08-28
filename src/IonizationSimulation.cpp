@@ -26,24 +26,37 @@
 #include "IonizationSimulation.hpp"
 #include "ChargeTransferRates.hpp"
 #include "ContinuousPhotonSourceFactory.hpp"
+#include "CrossSectionsFactory.hpp"
 #include "DensityFunctionFactory.hpp"
 #include "DensityGridFactory.hpp"
 #include "DensityGridWriterFactory.hpp"
 #include "DensityMaskFactory.hpp"
-#include "IonizationStateCalculator.hpp"
+#include "DiffuseReemissionHandler.hpp"
 #include "LineCoolingData.hpp"
 #include "MPICommunicator.hpp"
 #include "ParameterFile.hpp"
 #include "PhotonSourceDistributionFactory.hpp"
 #include "PhotonSourceSpectrumFactory.hpp"
+#include "RecombinationRatesFactory.hpp"
+#include "SimulationBox.hpp"
 #include "TemperatureCalculator.hpp"
-#include "VernerCrossSections.hpp"
-#include "VernerRecombinationRates.hpp"
 #include "WorkEnvironment.hpp"
 #include <fstream>
 
 /**
  * @brief Constructor.
+ *
+ * This method will read the following parameters from the parameter file:
+ *  - number of iterations: Number of iterations of the photoionization
+ *    algorithm to perform (default: 10)
+ *  - number of photons: Number of photon packets to use for each iteration of
+ *    the photoionization algorithm (default: 1e5)
+ *  - number of photons first loop: Number of photon packets to use for the
+ *    first iteration of the photoionization algorithm (default: (number of
+ *    photons))
+ *  - output folder: Folder where all output files will be placed (default: .)
+ *  - random seed: Seed used to initialize the random number generator (default:
+ *    42)
  *
  * @param write_output Should this process write output?
  * @param every_iteration_output Write an output file after every iteration of
@@ -65,11 +78,12 @@ IonizationSimulation::IonizationSimulation(const bool write_output,
       _mpi_communicator(mpi_communicator), _log(log),
       _work_distributor(_num_thread), _parameter_file(parameterfile),
       _number_of_iterations(_parameter_file.get_value< unsigned int >(
-          "max_number_iterations", 10)),
-      _number_of_photons(
-          _parameter_file.get_value< unsigned int >("number of photons", 100)),
+          "IonizationSimulation:number of iterations", 10)),
+      _number_of_photons(_parameter_file.get_value< unsigned int >(
+          "IonizationSimulation:number of photons", 1e5)),
       _number_of_photons_init(_parameter_file.get_value< unsigned int >(
-          "number of photons init", _number_of_photons)),
+          "IonizationSimulation:number of photons first loop",
+          _number_of_photons)),
       _abundances(_parameter_file, _log) {
 
   if (_log) {
@@ -81,87 +95,68 @@ IonizationSimulation::IonizationSimulation(const bool write_output,
     }
   }
 
+  // create cross section and recombination rate objects
+  _cross_sections = CrossSectionsFactory::generate(_parameter_file, _log);
+  _recombination_rates =
+      RecombinationRatesFactory::generate(_parameter_file, _log);
+
   // create the density grid and related objects
   _density_function = DensityFunctionFactory::generate(_parameter_file, _log);
   _density_mask = DensityMaskFactory::generate(_parameter_file, _log);
 
-  _density_grid = DensityGridFactory::generate(_parameter_file, _log);
+  const SimulationBox simulation_box(_parameter_file);
+  _density_grid = DensityGridFactory::generate(simulation_box, _parameter_file,
+                                               false, _log);
 
   // create the discrete UV sources
   _photon_source_distribution =
       PhotonSourceDistributionFactory::generate(_parameter_file, _log);
   _photon_source_spectrum = PhotonSourceSpectrumFactory::generate(
-      "photonsourcespectrum", _parameter_file, _log);
+      "PhotonSourceSpectrum", _parameter_file, _log);
 
   // sanity checks on discrete sources
   if (_photon_source_distribution != nullptr &&
       _photon_source_spectrum == nullptr) {
     cmac_error("No spectrum provided for the discrete photon sources!");
   }
-  if (_photon_source_distribution == nullptr &&
-      _photon_source_spectrum != nullptr) {
-    cmac_warning("Discrete photon source spectrum provided, but no discrete "
-                 "photon source distributions. The given spectrum will be "
-                 "ignored.");
-  }
 
   // create the continuous UV sources
-  _continuous_photon_source =
-      ContinuousPhotonSourceFactory::generate(_parameter_file, _log);
+  _continuous_photon_source = ContinuousPhotonSourceFactory::generate(
+      simulation_box.get_box(), _parameter_file, _log);
   _continuous_photon_source_spectrum = PhotonSourceSpectrumFactory::generate(
-      "continuousphotonsourcespectrum", _parameter_file, _log);
+      "ContinuousPhotonSourceSpectrum", _parameter_file, _log);
 
   // sanity checks on continuous sources
   if (_continuous_photon_source != nullptr &&
       _continuous_photon_source_spectrum == nullptr) {
     cmac_error("No spectrum provided for the continuous photon sources!");
   }
-  if (_continuous_photon_source == nullptr &&
-      _continuous_photon_source_spectrum != nullptr) {
-    cmac_warning("Continuous photon source spectrum provided, but no "
-                 "continuous photon source. The given spectrum will be "
-                 "ignored.");
-  }
 
   // create the actual photon source objects that emits the UV photons
   _photon_source = new PhotonSource(
       _photon_source_distribution, _photon_source_spectrum,
       _continuous_photon_source, _continuous_photon_source_spectrum,
-      _abundances, _cross_sections, _log);
+      _abundances, *_cross_sections, _parameter_file, _log);
   const double total_luminosity = _photon_source->get_total_luminosity();
 
   // set up output
+  std::string output_folder =
+      Utilities::get_absolute_path(_parameter_file.get_value< std::string >(
+          "IonizationSimulation:output folder", "."));
   _density_grid_writer = nullptr;
   if (write_output) {
-    _density_grid_writer =
-        DensityGridWriterFactory::generate(_parameter_file, _log);
+    _density_grid_writer = DensityGridWriterFactory::generate(
+        output_folder, _parameter_file, _log);
   }
 
-  // computation objects
-
-  // used to calculate the ionization state at fixed temperature
-  _ionization_state_calculator = new IonizationStateCalculator(
-      total_luminosity, _abundances, _recombination_rates,
-      _charge_transfer_rates);
-
-  bool calculate_temperature =
-      _parameter_file.get_value< bool >("calculate_temperature", true);
-
-  _temperature_calculator = nullptr;
-  if (calculate_temperature) {
-    // used to calculate both the ionization state and the temperature
-    _temperature_calculator = new TemperatureCalculator(
-        total_luminosity, _abundances,
-        _parameter_file.get_value< double >("pahfac", 1.),
-        _parameter_file.get_value< double >("crfac", 0.),
-        _parameter_file.get_value< double >("crlim", 0.75),
-        _parameter_file.get_physical_value< QUANTITY_LENGTH >("crscale",
-                                                              "1.33333 kpc"),
-        _line_cooling_data, _recombination_rates, _charge_transfer_rates, _log);
-  }
+  // used to calculate both the ionization state and the temperature
+  _temperature_calculator = new TemperatureCalculator(
+      total_luminosity, _abundances, _line_cooling_data, *_recombination_rates,
+      _charge_transfer_rates, _parameter_file, _log);
 
   // create ray tracing objects
-  int random_seed = _parameter_file.get_value< int >("random_seed", 42);
+  int random_seed =
+      _parameter_file.get_value< int >("IonizationSimulation:random seed", 42);
   // make sure every thread on every process has another random seed
   if (_mpi_communicator) {
     random_seed += _mpi_communicator->get_rank() * _num_thread;
@@ -173,14 +168,11 @@ IonizationSimulation::IonizationSimulation(const bool write_output,
   // now output all parameters (also those for which default values were used)
   // to a reference parameter file (only rank 0 does this)
   if (write_output) {
-    std::string folder =
-        Utilities::get_absolute_path(_parameter_file.get_value< std::string >(
-            "densitygridwriter:folder", "."));
-    std::ofstream pfile(folder + "/parameters-usedvalues.param");
+    std::ofstream pfile(output_folder + "/parameters-usedvalues.param");
     _parameter_file.print_contents(pfile);
     pfile.close();
     if (_log) {
-      _log->write_status("Wrote used parameters to ", folder,
+      _log->write_status("Wrote used parameters to ", output_folder,
                          "/parameters-usedvalues.param.");
     }
   }
@@ -285,6 +277,7 @@ void IonizationSimulation::run(DensityGridWriter *density_grid_writer) {
     }
 
     _density_grid->reset_grid(*_density_function);
+    DiffuseReemissionHandler::set_reemission_probabilities(*_density_grid);
     if (_log) {
       _log->write_status("Start shooting ", lnumphoton, " photons...");
     }
@@ -363,13 +356,8 @@ void IonizationSimulation::run(DensityGridWriter *density_grid_writer) {
     //        >(grid->get_heating_He_handle());
     //      }
 
-    if (_temperature_calculator && loop > 3) {
-      _temperature_calculator->calculate_temperature(totweight, *_density_grid,
-                                                     block);
-    } else {
-      _ionization_state_calculator->calculate_ionization_state(
-          totweight, *_density_grid, block);
-    }
+    _temperature_calculator->calculate_temperature(loop, totweight,
+                                                   *_density_grid, block);
 
     // the calculation above will have changed the ionic fractions, and might
     // have changed the temperatures
@@ -417,6 +405,12 @@ void IonizationSimulation::run(DensityGridWriter *density_grid_writer) {
     density_grid_writer->write(*_density_grid, _number_of_iterations,
                                _parameter_file);
   }
+
+  if (_log) {
+    _log->write_status("Total photon shooting time: ",
+                       Utilities::human_readable_time(_work_timer.value()),
+                       ".");
+  }
 }
 
 /**
@@ -425,11 +419,6 @@ void IonizationSimulation::run(DensityGridWriter *density_grid_writer) {
  * Deallocate memory used by internal variables.
  */
 IonizationSimulation::~IonizationSimulation() {
-  if (_log) {
-    _log->write_status("Total photon shooting time: ",
-                       Utilities::human_readable_time(_work_timer.value()),
-                       ".");
-  }
 
   // we delete the objects in the opposite order in which they were created
   // note that we do not check for nullptrs, as deleting a nullptr is allowed
@@ -440,7 +429,6 @@ IonizationSimulation::~IonizationSimulation() {
 
   // computation objects
   delete _temperature_calculator;
-  delete _ionization_state_calculator;
 
   // snapshot output
   delete _density_grid_writer;
@@ -460,4 +448,8 @@ IonizationSimulation::~IonizationSimulation() {
   delete _density_grid;
   delete _density_mask;
   delete _density_function;
+
+  // cross sections and recombination rates
+  delete _cross_sections;
+  delete _recombination_rates;
 }

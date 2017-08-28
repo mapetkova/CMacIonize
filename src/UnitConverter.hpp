@@ -28,6 +28,7 @@
 #define UNITCONVERTER_HPP
 
 #include "Error.hpp"
+#include "PhysicalConstants.hpp"
 #include "Unit.hpp"
 
 #include <cmath>
@@ -141,7 +142,9 @@ public:
     } else if (name == "erg") {
       return Unit(1.e-7, 2, -2, 1, 0, 0, 0);
     } else if (name == "eV") {
-      return Unit(1.60217662e-19, 2, -2, 1, 0, 0, 0);
+      return Unit(PhysicalConstants::get_physical_constant(
+                      PHYSICALCONSTANT_ELECTRONVOLT),
+                  2, -2, 1, 0, 0, 0);
     } else {
       /// error handler
       cmac_error("Unknown unit: \"%s\"!", name.c_str());
@@ -233,33 +236,35 @@ public:
     // energy to frequency conversion for photons
     Aunits.push_back(QUANTITY_ENERGY);
     Bunits.push_back(QUANTITY_FREQUENCY);
-    A_in_B_fac.push_back(1.5091902e33);
+    A_in_B_fac.push_back(
+        1. / PhysicalConstants::get_physical_constant(PHYSICALCONSTANT_PLANCK));
     A_in_B_pow.push_back(1);
     // wavelength to frequency conversion for photons
     Aunits.push_back(QUANTITY_LENGTH);
     Bunits.push_back(QUANTITY_FREQUENCY);
-    A_in_B_fac.push_back(299792458.);
+    A_in_B_fac.push_back(
+        PhysicalConstants::get_physical_constant(PHYSICALCONSTANT_LIGHTSPEED));
     A_in_B_pow.push_back(-1);
 
     /// don't change the part below unless you know what you're doing
     // just try every unit combination in the lists
     for (unsigned int i = 0; i < Aunits.size(); ++i) {
-      Unit Aunit = get_SI_unit(Aunits[i]);
-      Unit Bunit = get_SI_unit(Bunits[i]);
+      const Unit Aunit = get_SI_unit(Aunits[i]);
+      const Unit Bunit = get_SI_unit(Bunits[i]);
       if (unit_from.is_same_quantity(Aunit) &&
           unit_to.is_same_quantity(Bunit)) {
-        double fval = 1. * unit_from;
-        double tval = 1. * unit_to;
+        const double fval = 1. * unit_from;
+        const double tval = 1. * unit_to;
         double Sval = value * fval;
         if (A_in_B_pow[i] > 0) {
           int j = 1;
-          double Sfac = Sval;
+          const double Sfac = Sval;
           while (j < A_in_B_pow[i]) {
             ++j;
             Sval *= Sfac;
           }
         } else {
-          double Sfac = Sval;
+          const double Sfac = Sval;
           Sval = 1.;
           int j = 0;
           while (j < std::abs(A_in_B_pow[i])) {
@@ -271,14 +276,14 @@ public:
       }
       if (unit_from.is_same_quantity(Bunit) &&
           unit_to.is_same_quantity(Aunit)) {
-        double fval = 1. * unit_from;
-        double tval = 1. * unit_to;
+        const double fval = 1. * unit_from;
+        const double tval = 1. * unit_to;
         double Sval = value * fval / A_in_B_fac[i];
-        double A_in_B_pow_inv = 1. / A_in_B_pow[i];
+        const double A_in_B_pow_inv = 1. / A_in_B_pow[i];
         if (A_in_B_pow_inv > 0) {
           if (A_in_B_pow_inv == 1.) {
             int j = 1;
-            double Sfac = Sval;
+            const double Sfac = Sval;
             while (j < A_in_B_pow_inv) {
               ++j;
               Sval *= Sfac;
@@ -288,7 +293,7 @@ public:
           }
         } else {
           if (A_in_B_pow_inv == -1.) {
-            double Sfac = Sval;
+            const double Sfac = Sval;
             Sval = 1.;
             int j = 0;
             while (j < std::abs(A_in_B_pow_inv)) {
@@ -351,8 +356,8 @@ public:
              (isdigit(name[pos2]) || name[pos2] == '+' || name[pos2] == '-')) {
         ++pos2;
       }
-      std::string powstr = name.substr(pos1, pos2 - pos1);
-      int power = strtod(powstr.c_str(), nullptr);
+      const std::string powstr = name.substr(pos1, pos2 - pos1);
+      const int power = strtod(powstr.c_str(), nullptr);
       unit ^= power;
       if (pos2 == name.size()) {
         return unit;
@@ -385,8 +390,8 @@ public:
                                       name[pos2] == '+' || name[pos2] == '-')) {
           ++pos2;
         }
-        std::string powstr = name.substr(pos1, pos2 - pos1);
-        int power = strtod(powstr.c_str(), nullptr);
+        const std::string powstr = name.substr(pos1, pos2 - pos1);
+        const int power = strtod(powstr.c_str(), nullptr);
         unit2 ^= power;
       }
       unit *= unit2;
@@ -406,7 +411,7 @@ public:
    */
   template < Quantity _quantity_ >
   static inline double to_SI(double value, std::string unit) {
-    Unit SI_unit = get_SI_unit(_quantity_);
+    const Unit SI_unit = get_SI_unit(_quantity_);
     Unit strange_unit = get_unit(unit);
     if (!SI_unit.is_same_quantity(strange_unit)) {
       return try_conversion(value, strange_unit, SI_unit);
@@ -426,7 +431,7 @@ public:
    */
   template < Quantity _quantity_ >
   static inline double to_unit(double value, std::string unit) {
-    Unit SI_unit = get_SI_unit(_quantity_);
+    const Unit SI_unit = get_SI_unit(_quantity_);
     Unit strange_unit = get_unit(unit);
     if (!SI_unit.is_same_quantity(strange_unit)) {
       return try_conversion(value, SI_unit, strange_unit);
@@ -445,7 +450,7 @@ public:
   static inline double convert(double value, std::string unit_from,
                                std::string unit_to) {
     Unit strange_unit_from = get_unit(unit_from);
-    Unit strange_unit_to = get_unit(unit_to);
+    const Unit strange_unit_to = get_unit(unit_to);
     if (!strange_unit_to.is_same_quantity(strange_unit_from)) {
       return try_conversion(value, strange_unit_from, strange_unit_to);
       cmac_error("Units are not compatible: \"%s\" and \"%s\"!",

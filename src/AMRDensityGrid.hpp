@@ -31,6 +31,7 @@
 #include "Abundances.hpp"
 #include "DensityGrid.hpp"
 #include "ParameterFile.hpp"
+#include "SimulationBox.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -122,9 +123,6 @@ private:
         old_reemission_probability[i] =
             _ionization_variables[index].get_reemission_probability(name);
       }
-      // we do not copy the mean intensity integrals from the old cell, as these
-      // will be reset before the refined cells are used
-      double old_neutral_fraction_H_old = _neutral_fraction_H_old[index];
       // we will not copy the heating terms for the same reasons
       // nor the EmissivityValues
       // nor the Lock, since that has to be unique
@@ -136,8 +134,6 @@ private:
         // the first child replaces the old cell
         // the other children are added to the end of the internal lists
         if (ic == 0) {
-          _mean_intensity_H_old[index] = 0.;
-          _neutral_fraction_H_old[index] = old_neutral_fraction_H_old;
           _emissivities[index] = nullptr;
           _cells[index] = childcell;
           childcell->value() = index;
@@ -170,8 +166,6 @@ private:
           }
         } else {
           _ionization_variables.push_back(IonizationVariables());
-          _mean_intensity_H_old.push_back(0.);
-          _neutral_fraction_H_old.push_back(old_neutral_fraction_H_old);
           _emissivities.push_back(nullptr);
 #ifndef USE_LOCKFREE
           _lock.push_back(Lock());
@@ -217,7 +211,7 @@ public:
   /**
    * @brief Constructor.
    *
-   * @param box Box containing the grid.
+   * @param simulation_box Simulation box (in m).
    * @param ncell Number of cells in the low resolution grid.
    * @param refinement_scheme Refinement scheme used to refine cells. Memory
    * management for this pointer is taken over by this class.
@@ -228,12 +222,12 @@ public:
    * @param log Log to write logging info to.
    */
   inline AMRDensityGrid(
-      Box<> box, CoordinateVector< int > ncell,
+      const Box<> &simulation_box, CoordinateVector< int > ncell,
       AMRRefinementScheme *refinement_scheme = nullptr,
       unsigned char refinement_interval = 5,
       CoordinateVector< bool > periodic = CoordinateVector< bool >(false),
       bool hydro = false, Log *log = nullptr)
-      : DensityGrid(box, periodic, hydro, log),
+      : DensityGrid(simulation_box, periodic, hydro, log),
         _refinement_scheme(refinement_scheme),
         _refinement_interval(refinement_interval), _reset_count(0) {
 
@@ -248,7 +242,7 @@ public:
     int power_of_2 = std::min(power_of_2_x, power_of_2_y);
     power_of_2 = std::min(power_of_2, power_of_2_z);
     CoordinateVector< int > nblock = ncell / power_of_2;
-    _grid = AMRGrid< unsigned long >(box, nblock);
+    _grid = AMRGrid< unsigned long >(simulation_box, nblock);
 
     // find out how many cells each block should have at the lowest level
     // this is just the power in power_of_2
@@ -288,23 +282,28 @@ public:
   /**
    * @brief ParameterFile constructor.
    *
+   * Parameters are:
+   *  - unrefined number of cells: Number of cells in the initial top level grid
+   *    without refinement (default: [64, 64, 64])
+   *  - refinement interval: Number of ionization computation iterations between
+   *    successive applications of the refinement algorithm (default: 5)
+   *
+   * @param simulation_box SimulationBox.
    * @param params ParameterFile to read.
+   * @param hydro Is hydrodynamics enabled?
    * @param log Log to write log messages to.
    */
-  inline AMRDensityGrid(ParameterFile &params, Log *log)
-      : AMRDensityGrid(
-            Box<>(params.get_physical_vector< QUANTITY_LENGTH >(
-                      "densitygrid:box_anchor", "[0. m, 0. m, 0. m]"),
-                  params.get_physical_vector< QUANTITY_LENGTH >(
-                      "densitygrid:box_sides", "[1. m, 1. m, 1. m]")),
-            params.get_value< CoordinateVector< int > >(
-                "densitygrid:ncell", CoordinateVector< int >(64)),
-            AMRRefinementSchemeFactory::generate(params, log),
-            params.get_value< unsigned char >("densitygrid:refinement_interval",
-                                              5),
-            params.get_value< CoordinateVector< bool > >(
-                "densitygrid:periodicity", CoordinateVector< bool >(false)),
-            params.get_value< bool >("hydro:active", false), log) {}
+  inline AMRDensityGrid(const SimulationBox &simulation_box,
+                        ParameterFile &params, bool hydro = false,
+                        Log *log = nullptr)
+      : AMRDensityGrid(simulation_box.get_box(),
+                       params.get_value< CoordinateVector< int > >(
+                           "DensityGrid:unrefined number of cells",
+                           CoordinateVector< int >(64)),
+                       AMRRefinementSchemeFactory::generate(params, log),
+                       params.get_value< unsigned char >(
+                           "DensityGrid:refinement interval", 5),
+                       simulation_box.get_periodicity(), hydro, log) {}
 
   /**
    * @brief Destructor.
@@ -350,7 +349,7 @@ public:
     }
 
     // finalize grid: set neighbour relations
-    _grid.set_ngbs(_periodic);
+    _grid.set_ngbs(_periodicity_flags);
 
     // make sure all values are correctly initialized (also in refined cells)
     // the refinement procedure itself only reads the density from the density
@@ -388,7 +387,7 @@ public:
       }
 
       // reset the ngbs
-      _grid.set_ngbs(_periodic);
+      _grid.set_ngbs(_periodicity_flags);
     }
 
     // make sure all cells are correctly reset (also the new ones, if any)
@@ -576,7 +575,7 @@ public:
     AMRGridCell< unsigned long > *next_cell = cell->get_ngb(ngbposition);
     if (next_cell != nullptr) {
       // calculate periodic boundary corrections (if any)
-      if (_periodic.x()) {
+      if (_periodicity_flags.x()) {
         CoordinateVector<> nm = next_cell->get_geometry().get_anchor();
         if (next_direction[0] > 0. && nm.x() < cell_bottom_anchor.x()) {
           periodic_correction[0] = -_box.get_sides().x();
@@ -584,7 +583,7 @@ public:
           periodic_correction[0] = _box.get_sides().x();
         }
       }
-      if (_periodic.y()) {
+      if (_periodicity_flags.y()) {
         CoordinateVector<> nm = next_cell->get_geometry().get_anchor();
         if (next_direction[1] > 0. && nm.y() < cell_bottom_anchor.y()) {
           periodic_correction[1] = -_box.get_sides().y();
@@ -592,7 +591,7 @@ public:
           periodic_correction[1] = _box.get_sides().y();
         }
       }
-      if (_periodic.z()) {
+      if (_periodicity_flags.z()) {
         CoordinateVector<> nm = next_cell->get_geometry().get_anchor();
         if (next_direction[2] > 0. && nm.z() < cell_bottom_anchor.z()) {
           periodic_correction[2] = -_box.get_sides().z();

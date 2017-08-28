@@ -30,6 +30,11 @@
 
 #include <windows.h>
 
+// needed for memory info functionality
+// needs to be included after windows.h, because otherwise lots and lots of
+// compilation errors are generated
+#include <psapi.h>
+
 /**
  * @brief Class used to store time information.
  */
@@ -99,6 +104,17 @@ inline std::string OperatingSystem::absolute_path(std::string path) {
   std::string absolute_path(absolute_path_ptr);
   free(absolute_path_ptr);
   return absolute_path;
+}
+
+/**
+ * @brief Get the peak memory usage of the current application.
+ *
+ * @return Peak memory usage of the application (in bytes).
+ */
+inline size_t OperatingSystem::get_peak_memory_usage() {
+  PROCESS_MEMORY_COUNTERS info;
+  GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
+  return static_cast< size_t >(info.PeakWorkingSetSize);
 }
 
 #endif // WINDOWS_HPP

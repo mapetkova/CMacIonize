@@ -24,6 +24,7 @@
  * @author Bert Vandenbroucke (bv7@st-andrews.ac.uk)
  */
 #include "VoronoiDensityGrid.hpp"
+#include "SimulationBox.hpp"
 #include "VoronoiGeneratorDistribution.hpp"
 #include "VoronoiGeneratorDistributionFactory.hpp"
 #include "VoronoiGrid.hpp"
@@ -79,26 +80,23 @@
  *
  * @param position_generator VoronoiGeneratorDistribution used to generate
  * generator positions.
- * @param box Box containing the entire grid (in m).
+ * @param simulation_box Simulation box (in m).
  * @param grid_type Type of Voronoi grid to use.
  * @param num_lloyd Number of Lloyd iterations to apply to the grid after it has
  * been constructed for the first time.
  * @param periodic Periodicity flags.
  * @param hydro Flag signaling if hydro is active or not.
- * @param hydro_timestep Time step used in the hydro scheme (in s).
- * @param hydro_gamma Polytropic index for the ideal gas equation of state.
  * @param log Log to write logging info to.
  */
 VoronoiDensityGrid::VoronoiDensityGrid(
-    VoronoiGeneratorDistribution *position_generator, Box<> box,
-    std::string grid_type, unsigned char num_lloyd,
-    CoordinateVector< bool > periodic, bool hydro, double hydro_timestep,
-    double hydro_gamma, Log *log)
-    : DensityGrid(box, periodic, hydro, log),
+    VoronoiGeneratorDistribution *position_generator,
+    const Box<> &simulation_box, std::string grid_type, unsigned char num_lloyd,
+    CoordinateVector< bool > periodic, bool hydro, Log *log)
+    : DensityGrid(simulation_box, periodic, hydro, log),
       _position_generator(position_generator), _voronoi_grid(nullptr),
-      _periodic(periodic), _num_lloyd(num_lloyd),
-      _hydro_timestep(hydro_timestep), _hydro_gamma(hydro_gamma),
-      _epsilon(1.e-12 * box.get_sides().norm()), _voronoi_grid_type(grid_type) {
+      _periodicity_flags(periodic), _num_lloyd(num_lloyd),
+      _epsilon(1.e-12 * simulation_box.get_sides().norm()),
+      _voronoi_grid_type(grid_type) {
 
   const unsigned long totnumcell =
       _position_generator->get_number_of_positions();
@@ -109,34 +107,40 @@ VoronoiDensityGrid::VoronoiDensityGrid(
 
   if (log) {
     log->write_status("Created VoronoiDensityGrid in a box with anchor [",
-                      box.get_anchor().x(), " m, ", box.get_anchor().y(),
-                      " m, ", box.get_anchor().z(), " m], and sides [",
-                      box.get_sides().x(), " m, ", box.get_sides().y(), " m, ",
-                      box.get_sides().z(), "m].");
+                      simulation_box.get_anchor().x(), " m, ",
+                      simulation_box.get_anchor().y(), " m, ",
+                      simulation_box.get_anchor().z(), " m], and sides [",
+                      simulation_box.get_sides().x(), " m, ",
+                      simulation_box.get_sides().y(), " m, ",
+                      simulation_box.get_sides().z(), "m].");
   }
 }
 
 /**
  * @brief ParameterFile constructor.
  *
+ * Parameters are:
+ *  - grid type: Type of Voronoi grid construction algorithm to use (Old/New,
+ *    default: Old)
+ *  - number of Lloyd iterations: Number of Lloyd iterations to apply to the
+ *    initial grid to make it more regular (default: 0)
+ *
+ * @param simulation_box SimulationBox.
  * @param params ParameterFile to read from.
+ * @param hydro Is hydrodynamics enabled?
  * @param log Log to write logging info to.
  */
-VoronoiDensityGrid::VoronoiDensityGrid(ParameterFile &params, Log *log)
+VoronoiDensityGrid::VoronoiDensityGrid(const SimulationBox &simulation_box,
+                                       ParameterFile &params, bool hydro,
+                                       Log *log)
     : VoronoiDensityGrid(
-          VoronoiGeneratorDistributionFactory::generate(params, log),
-          Box<>(params.get_physical_vector< QUANTITY_LENGTH >(
-                    "densitygrid:box_anchor", "[0. m, 0. m, 0. m]"),
-                params.get_physical_vector< QUANTITY_LENGTH >(
-                    "densitygrid:box_sides", "[1. m, 1. m, 1. m]")),
-          params.get_value< std::string >("densitygrid:grid_type", "Old"),
-          params.get_value< unsigned char >("densitygrid:num_lloyd", 0),
-          params.get_value< CoordinateVector< bool > >(
-              "densitygrid:periodicity", CoordinateVector< bool >(false)),
-          params.get_value< bool >("hydro:active", false),
-          params.get_physical_value< QUANTITY_TIME >("hydro:timestep",
-                                                     "0.01 s"),
-          params.get_value< double >("hydro:polytropic_index", 5. / 3.), log) {}
+          VoronoiGeneratorDistributionFactory::generate(
+              simulation_box.get_box(), params, log),
+          simulation_box.get_box(),
+          params.get_value< std::string >("DensityGrid:grid type", "Old"),
+          params.get_value< unsigned char >(
+              "DensityGrid:number of Lloyd iterations", 0),
+          simulation_box.get_periodicity(), hydro, log) {}
 
 /**
  * @brief Destructor.
@@ -167,7 +171,7 @@ void VoronoiDensityGrid::initialize(
     _generator_positions[i] = _position_generator->get_position();
   }
   _voronoi_grid = VoronoiGridFactory::generate(
-      _voronoi_grid_type, _generator_positions, _box, _periodic);
+      _voronoi_grid_type, _generator_positions, _box, _periodicity_flags);
 
   // compute the grid
   _voronoi_grid->compute_grid();
@@ -189,7 +193,7 @@ void VoronoiDensityGrid::initialize(
       }
       delete _voronoi_grid;
       _voronoi_grid = VoronoiGridFactory::generate(
-          _voronoi_grid_type, _generator_positions, _box, _periodic);
+          _voronoi_grid_type, _generator_positions, _box, _periodicity_flags);
       _voronoi_grid->compute_grid();
     }
 
@@ -208,7 +212,7 @@ void VoronoiDensityGrid::initialize(
  * @param timestep Timestep with which to move the generators (in s).
  */
 void VoronoiDensityGrid::evolve(double timestep) {
-  if (_hydro) {
+  if (_has_hydro) {
     // move the cell generators and update the velocities to the new fluid
     // velocities
     if (_log) {
@@ -219,14 +223,14 @@ void VoronoiDensityGrid::evolve(double timestep) {
       const unsigned int index = it.get_index();
 
       const CoordinateVector<> vgrid = _hydro_generator_velocity[index];
-      _generator_positions[index] += _hydro_timestep * vgrid;
+      _generator_positions[index] += timestep * vgrid;
     }
 
     voronoidensitygrid_print_generators();
 
     delete _voronoi_grid;
     _voronoi_grid = VoronoiGridFactory::generate(
-        _voronoi_grid_type, _generator_positions, _box, _periodic);
+        _voronoi_grid_type, _generator_positions, _box, _periodicity_flags);
     _voronoi_grid->compute_grid();
 
     if (_log) {
@@ -237,9 +241,11 @@ void VoronoiDensityGrid::evolve(double timestep) {
 
 /**
  * @brief Set the velocities of the grid generators.
+ *
+ * @param gamma Polytropic index of the gas.
  */
-void VoronoiDensityGrid::set_grid_velocity() {
-  if (_hydro) {
+void VoronoiDensityGrid::set_grid_velocity(double gamma) {
+  if (_has_hydro) {
     for (auto it = begin(); it != end(); ++it) {
       const unsigned int index = it.get_index();
 
@@ -255,7 +261,7 @@ void VoronoiDensityGrid::set_grid_velocity() {
       CoordinateVector<> vcorr;
       if (dcellnorm > 0.9 * eta * R) {
         const double cs =
-            std::sqrt(_hydro_gamma * hydro_vars.get_primitives_pressure() /
+            std::sqrt(gamma * hydro_vars.get_primitives_pressure() /
                       hydro_vars.get_primitives_density());
         vcorr = cs * dcell / dcellnorm;
         if (dcellnorm < 1.1 * eta * R) {

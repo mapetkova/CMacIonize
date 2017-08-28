@@ -44,8 +44,10 @@ public:
    */
   virtual DensityValues operator()(const Cell &cell) const {
     const CoordinateVector<> position = cell.get_cell_midpoint();
-    const double hydrogen_mass = 1.6737236e-27;
-    const double boltzmann_k = 1.38064852e-23;
+    const double hydrogen_mass =
+        PhysicalConstants::get_physical_constant(PHYSICALCONSTANT_PROTON_MASS);
+    const double boltzmann_k =
+        PhysicalConstants::get_physical_constant(PHYSICALCONSTANT_BOLTZMANN);
     const double density_unit = 1. / hydrogen_mass;
     const double temperature_unit = hydrogen_mass / boltzmann_k;
     DensityValues values;
@@ -176,8 +178,7 @@ int main(int argc, char **argv) {
     CoordinateVector< bool > periodic(false, false, false);
     OneDVoronoiGeneratorDistribution *generators =
         new OneDVoronoiGeneratorDistribution();
-    VoronoiDensityGrid grid(generators, box, "Old", 0, periodic, true, 0.001,
-                            5. / 3.);
+    VoronoiDensityGrid grid(generators, box, "Old", 0, periodic, true);
     std::pair< unsigned long, unsigned long > block =
         std::make_pair(0, grid.get_number_of_cells());
     grid.initialize(block, density_function);

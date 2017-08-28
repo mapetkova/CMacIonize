@@ -38,6 +38,7 @@
 #include "MonochromaticPhotonSourceSpectrum.hpp"
 #include "ParameterFile.hpp"
 #include "PhotonSource.hpp"
+#include "SimulationBox.hpp"
 #include "SpiralGalaxyContinuousPhotonSource.hpp"
 #include "SpiralGalaxyDensityFunction.hpp"
 #include "Timer.hpp"
@@ -50,6 +51,11 @@
 
 /**
  * @brief Perform a dusty radiative transfer simulation.
+ *
+ * This method reads the following parameters from the parameter file:
+ *  - random seed: Seed for the random number generator (default: 42)
+ *  - output folder: Folder where all output files will be placed (default: .)
+ *  - number of photons: Number of photons to use (default: 5e5)
  *
  * @param parser CommandLineParser that contains the parsed command line
  * arguments.
@@ -72,31 +78,35 @@ int DustSimulation::do_simulation(CommandLineParser &parser, bool write_output,
   // DensityGrid object with geometrical and physical properties
   SpiralGalaxyDensityFunction density_function(params, log);
 
-  CartesianDensityGrid grid(params, log);
+  const SimulationBox simulation_box(params);
+  CartesianDensityGrid grid(simulation_box, params, false, log);
 
-  int random_seed = params.get_value< int >("random_seed", 42);
+  int random_seed = params.get_value< int >("DustSimulation:random seed", 42);
 
-  SpiralGalaxyContinuousPhotonSource continuoussource(params, log);
+  SpiralGalaxyContinuousPhotonSource continuoussource(simulation_box.get_box(),
+                                                      params, log);
   MonochromaticPhotonSourceSpectrum continuousspectrum(13.6, 1., log);
 
   Abundances abundances(0., 0., 0., 0., 0., 0., log);
   VernerCrossSections cross_sections;
   PhotonSource source(nullptr, nullptr, &continuoussource, &continuousspectrum,
-                      abundances, cross_sections, log);
+                      abundances, cross_sections, false, log);
 
   DustScattering dust_scattering(params, log);
-  CCDImage dust_image(params, log);
+
+  // set up output
+  std::string output_folder = Utilities::get_absolute_path(
+      params.get_value< std::string >("DustSimulation:output folder", "."));
+  CCDImage dust_image(output_folder, params, log);
 
   unsigned int numphoton =
-      params.get_value< unsigned int >("number of photons", 500000);
+      params.get_value< unsigned int >("DustSimulation:number of photons", 5e5);
 
   // we are done reading the parameter file
   // now output all parameters (also those for which default values were used)
   // to a reference parameter file (only rank 0 does this)
   if (write_output) {
-    std::string folder = Utilities::get_absolute_path(
-        params.get_value< std::string >("output_folder", "."));
-    std::string pfilename = folder + "/dust-parameters-usedvalues.param";
+    std::string pfilename = output_folder + "/dust-parameters-usedvalues.param";
     std::ofstream pfile(pfilename);
     params.print_contents(pfile);
     pfile.close();

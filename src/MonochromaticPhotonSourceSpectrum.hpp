@@ -53,6 +53,7 @@ public:
   MonochromaticPhotonSourceSpectrum(double frequency, double total_flux = -1,
                                     Log *log = nullptr)
       : _frequency(frequency), _total_flux(total_flux) {
+
     if (log) {
       log->write_status(
           "Created MonochromaticPhotonSourceSpectrum with frequency ",
@@ -62,6 +63,12 @@ public:
 
   /**
    * @brief ParameterFile constructor.
+   *
+   * Parameters are:
+   *  - frequency: Constant monochromatic frequency of the spectrum (default:
+   *    13.6 eV)
+   *  - total flux: Total flux of the spectrum (default: none, and error when
+   *    total flux is requested)
    *
    * @param role Role the spectrum will fulfil in the simulation. Parameters are
    * read from the corresponding block in the parameter file.
@@ -73,7 +80,7 @@ public:
       : MonochromaticPhotonSourceSpectrum(
             params.get_physical_value< QUANTITY_FREQUENCY >(role + ":frequency",
                                                             "13.6 eV"),
-            params.get_physical_value< QUANTITY_FLUX >(role + ":total_flux",
+            params.get_physical_value< QUANTITY_FLUX >(role + ":total flux",
                                                        "-1. m^-2 s^-1"),
             log) {}
 
