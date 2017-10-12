@@ -56,6 +56,7 @@
 #include "SimulationBox.hpp"
 #include "TemperatureCalculator.hpp"
 #include "TerminalLog.hpp"
+#include "TimeLine.hpp"
 #include "Timer.hpp"
 #include "WorkDistributor.hpp"
 #include "WorkEnvironment.hpp"
@@ -63,14 +64,33 @@
 #include <iostream>
 #include <string>
 
+/*! @brief Stop the serial time timer and start the parallel time timer. */
+#define start_parallel_timing_block()                                          \
+  serial_timer.stop();                                                         \
+  parallel_timer.start();
+
+/*! @brief Stop the parallel time timer and start the serial time timer. */
+#define stop_parallel_timing_block()                                           \
+  parallel_timer.stop();                                                       \
+  serial_timer.start();
+
 /**
  * @brief Perform an RHD simulation.
  *
  * This method reads the following parameters from the parameter file:
- *  - timestep: Hydrodynamical time step (default: 0.01 s)
+ *  - minimum timestep: Smallest possible hydrodynamical time step, an error is
+ *    thrown if the time step wants to be smaller than this value (default:
+ *    0.01*(total time))
+ *  - maximum timestep: Largest possible hydrodynamical time step. The time step
+ *    will always be smaller or equal to this value, even if the integration
+ *    does not require it to be this small (default: 0.1*(total time))
  *  - total time: Total simulation time (default: 1. s)
  *  - snapshot time: Time interval between consecutive snapshot dumps (default:
  *    0.1*(total time))
+ *  - radiation time: Time interval between consecutive updates of the
+ *    ionization structure by running the photoionization code. If a negative
+ *    value is given, the radiation field is updated every time step. (default:
+ *    -1. s: update every time step)
  *  - random seed: Seed for the random number generator (default: 42)
  *  - output folder: Folder where all output files will be placed (default: .)
  *  - number of iterations: Number of iterations of the photoionization
@@ -92,11 +112,19 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
                                                     Timer &programtimer,
                                                     Log *log) {
 
+  Timer total_timer;
+  Timer serial_timer;
+  Timer parallel_timer;
+
+  total_timer.start();
+  serial_timer.start();
+
   bool every_iteration_output =
       parser.get_value< bool >("every-iteration-output");
 
   // set the maximum number of openmp threads
-  WorkEnvironment::set_max_num_threads(parser.get_value< int >("threads"));
+  WorkEnvironment::set_max_num_threads(
+      parser.get_value< int_fast32_t >("threads"));
 
   // second: initialize the parameters that are read in from static files
   // these files should be configured by CMake and put in a location that is
@@ -121,17 +149,31 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
 
   HydroIntegrator *hydro_integrator =
       new HydroIntegrator(simulation_box, params);
-  const double hydro_timestep = params.get_physical_value< QUANTITY_TIME >(
-      "RadiationHydrodynamicsSimulation:timestep", "0.01 s");
   const double hydro_total_time = params.get_physical_value< QUANTITY_TIME >(
       "RadiationHydrodynamicsSimulation:total time", "1. s");
-  const unsigned int numstep = hydro_total_time / hydro_timestep;
+
+  double hydro_minimum_timestep = params.get_physical_value< QUANTITY_TIME >(
+      "RadiationHydrodynamicsSimulation:minimum timestep", "-1. s");
+  if (hydro_minimum_timestep < 0.) {
+    hydro_minimum_timestep = 0.01 * hydro_total_time;
+  }
+
+  double hydro_maximum_timestep = params.get_physical_value< QUANTITY_TIME >(
+      "RadiationHydrodynamicsSimulation:maximum timestep", "-1. s");
+  if (hydro_maximum_timestep < 0.) {
+    hydro_maximum_timestep = 0.1 * hydro_total_time;
+  }
+
   double hydro_snaptime = params.get_physical_value< QUANTITY_TIME >(
       "RadiationHydrodynamicsSimulation:snapshot time", "-1. s");
   if (hydro_snaptime < 0.) {
     hydro_snaptime = 0.1 * hydro_total_time;
   }
-  unsigned int hydro_lastsnap = 1;
+  uint_fast32_t hydro_lastsnap = 1;
+
+  const double hydro_radtime = params.get_physical_value< QUANTITY_TIME >(
+      "RadiationHydrodynamicsSimulation:radiation time", "-1. s");
+  uint_fast32_t hydro_lastrad = 0;
 
   DensityGrid *grid =
       DensityGridFactory::generate(simulation_box, params, true, log);
@@ -140,7 +182,7 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
   // separate StellarSources object with geometrical and physical properties.
   PhotonSourceDistribution *sourcedistribution =
       PhotonSourceDistributionFactory::generate(params, log);
-  int random_seed = params.get_value< int >(
+  int_fast32_t random_seed = params.get_value< int_fast32_t >(
       "RadiationHydrodynamicsSimulation:random seed", 42);
   PhotonSourceSpectrum *spectrum = PhotonSourceSpectrumFactory::generate(
       "PhotonSourceSpectrum", params, log);
@@ -183,12 +225,12 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
   DensityGridWriter *writer =
       DensityGridWriterFactory::generate(output_folder, params, log);
 
-  unsigned int nloop = params.get_value< unsigned int >(
+  uint_fast32_t nloop = params.get_value< uint_fast32_t >(
       "RadiationHydrodynamicsSimulation:number of iterations", 10);
 
-  unsigned int numphoton = params.get_value< unsigned int >(
+  uint_fast64_t numphoton = params.get_value< uint_fast64_t >(
       "RadiationHydrodynamicsSimulation:number of photons", 1e5);
-  unsigned int numphoton1 = params.get_value< unsigned int >(
+  uint_fast64_t numphoton1 = params.get_value< uint_fast64_t >(
       "RadiationHydrodynamicsSimulation:number of photons first loop",
       numphoton);
   double Q = source.get_total_luminosity();
@@ -229,28 +271,14 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
   }
 
   // done writing file, now initialize grid
-  std::pair< unsigned long, unsigned long > block =
+  std::pair< cellsize_t, cellsize_t > block =
       std::make_pair(0, grid->get_number_of_cells());
   grid->initialize(block, *density_function);
 
-  // grid->initialize initialized:
-  // - densities
-  // - temperatures
-  // - ionic fractions
-  // we have to gather these across all processes
-
-  // this is currently BROKEN...
-  //  comm.gather(grid->get_number_density_handle());
-  //  comm.gather(grid->get_temperature_handle());
-  //  for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
-  //    IonName ion = static_cast< IonName >(i);
-  //    comm.gather(grid->get_ionic_fraction_handle(ion));
-  //  }
-
   // object used to distribute jobs in a shared memory parallel context
   WorkDistributor< IonizationPhotonShootJobMarket, IonizationPhotonShootJob >
-  workdistributor(parser.get_value< int >("threads"));
-  const int worksize = workdistributor.get_worksize();
+      workdistributor(parser.get_value< int_fast32_t >("threads"));
+  const int_fast32_t worksize = workdistributor.get_worksize();
   Timer worktimer;
 
   if (density_mask != nullptr) {
@@ -269,34 +297,59 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
   IonizationPhotonShootJobMarket photonshootjobs(source, random_seed, *grid, 0,
                                                  100, worksize);
 
-  if (hydro_integrator != nullptr) {
-    // initialize the hydro variables (before we write the initial snapshot)
-    hydro_integrator->initialize_hydro_variables(*grid);
-  }
+  // initialize the hydro variables (before we write the initial snapshot)
+  hydro_integrator->initialize_hydro_variables(*grid);
 
   if (write_output) {
     writer->write(*grid, 0, params);
   }
 
-  for (unsigned int istep = 0; istep < numstep; ++istep) {
+  double maximum_timestep = hydro_maximum_timestep;
+  if (hydro_radtime > 0.) {
+    // make sure the system is evolved hydrodynamically in between successive
+    // ionization steps
+    maximum_timestep = std::min(maximum_timestep, hydro_radtime);
+  }
+  TimeLine timeline(0., hydro_total_time, hydro_minimum_timestep,
+                    maximum_timestep);
+  bool has_next_step = true;
+  uint_fast32_t num_step = 0;
+  while (has_next_step) {
+    double requested_timestep = hydro_integrator->get_maximal_timestep(*grid);
+    double actual_timestep, current_time;
+    has_next_step =
+        timeline.advance(requested_timestep, actual_timestep, current_time);
+    ++num_step;
     if (log) {
-      log->write_status("Starting hydro step ", istep, ".");
+      log->write_status("Starting hydro step ", num_step, ", t = ",
+                        (current_time - actual_timestep), " s, dt = ",
+                        actual_timestep, " s.");
     }
 
     // finally: the actual program loop whereby the density grid is ray traced
     // using photon packets generated by the stellar sources
-    unsigned int loop = 0;
-    while (loop < nloop) {
+    uint_fast32_t loop = 0;
+    uint_fast32_t nloop_step = nloop;
+
+    // decide whether or not to do the radiation step
+    if (hydro_radtime < 0. ||
+        (current_time - actual_timestep) >= hydro_lastrad * hydro_radtime) {
+      ++hydro_lastrad;
+    } else {
+      nloop_step = 0;
+    }
+
+    if (log && nloop_step > 0) {
+      log->write_status("Starting radiation step...");
+    }
+
+    while (loop < nloop_step) {
 
       if (log) {
-        log->write_status("Starting loop ", loop, ".");
+        log->write_status("Loop ", loop, " of ", nloop_step, ".");
       }
 
-      //    if (loop == 3 || loop == 9) {
-      //      numphoton *= 10;
-      //    }
-
-      unsigned int lnumphoton = numphoton;
+      uint_fast64_t lnumphoton = numphoton;
 
       if (loop == 0) {
         // overwrite the number of photons for the first loop (might be useful
@@ -307,135 +360,68 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
 
       grid->reset_grid(*density_function);
       DiffuseReemissionHandler::set_reemission_probabilities(*grid);
-      if (log) {
-        log->write_status("Start shooting ", lnumphoton, " photons...");
-      }
 
       double typecount[PHOTONTYPE_NUMBER] = {0};
 
       double totweight = 0.;
 
-      unsigned int local_numphoton = lnumphoton;
+      uint_fast64_t local_numphoton = lnumphoton;
 
       photonshootjobs.set_numphoton(local_numphoton);
       worktimer.start();
+      start_parallel_timing_block();
       workdistributor.do_in_parallel(photonshootjobs);
+      stop_parallel_timing_block();
       worktimer.stop();
 
       photonshootjobs.update_counters(totweight, typecount);
 
-      if (log) {
-        log->write_status("Done shooting photons.");
-        log->write_status(
-            100. * typecount[PHOTONTYPE_ABSORBED] / totweight,
-            "% of photons were reemitted as non-ionizing photons.");
-        log->write_status(100. * (typecount[PHOTONTYPE_DIFFUSE_HI] +
-                                  typecount[PHOTONTYPE_DIFFUSE_HeI]) /
-                              totweight,
-                          "% of photons were scattered.");
-        double escape_fraction =
-            (100. * (totweight - typecount[PHOTONTYPE_ABSORBED])) / totweight;
-        // since totweight is updated in chunks, while the counters are updated
-        // per photon, round off might cause totweight to be slightly smaller
-        // than the counter value. This gives (strange looking) negative escape
-        // fractions, which we reset to 0 here.
-        escape_fraction = std::max(0., escape_fraction);
-        log->write_status("Escape fraction: ", escape_fraction, "%.");
-        double escape_fraction_HI =
-            (100. * typecount[PHOTONTYPE_DIFFUSE_HI]) / totweight;
-        log->write_status("Diffuse HI escape fraction: ", escape_fraction_HI,
-                          "%.");
-        double escape_fraction_HeI =
-            (100. * typecount[PHOTONTYPE_DIFFUSE_HeI]) / totweight;
-        log->write_status("Diffuse HeI escape fraction: ", escape_fraction_HeI,
-                          "%.");
-      }
-
-      if (log) {
-        log->write_status("Calculating ionization state after shooting ",
-                          lnumphoton, " photons...");
-      }
-
-      // reduce the mean intensity integrals and heating terms across all
-      // processes
-
-      // this code is currently BROKEN...
-      //      for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
-      //        IonName ion = static_cast< IonName >(i);
-      //        comm.reduce< MPI_SUM_OF_ALL_PROCESSES >(
-      //            grid->get_mean_intensity_handle(ion));
-      //      }
-      //      if (calculate_temperature && loop > 3) {
-      //        comm.reduce< MPI_SUM_OF_ALL_PROCESSES
-      //        >(grid->get_heating_H_handle());
-      //        comm.reduce< MPI_SUM_OF_ALL_PROCESSES
-      //        >(grid->get_heating_He_handle());
-      //      }
-
+      start_parallel_timing_block();
       temperature_calculator->calculate_temperature(loop, totweight, *grid,
                                                     block);
-
-      // the calculation above will have changed the ionic fractions, and might
-      // have changed the temperatures
-      // we have to gather these across all processes
-
-      // this is currently BROKEN...
-      //      for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
-      //        IonName ion = static_cast< IonName >(i);
-      //        comm.gather(grid->get_ionic_fraction_handle(ion));
-      //      }
-      //      if (calculate_temperature && loop > 3) {
-      //        comm.gather(grid->get_temperature_handle());
-      //      }
-
-      if (log) {
-        log->write_status("Done calculating ionization state.");
-      }
-
-      // calculate emissivities
-      // we disabled this, since we now have the post-processing Python library
-      // for this
-      //    if (loop > 3 && abundances.get_abundance(ELEMENT_He) > 0.) {
-      //      emissivity_calculator.calculate_emissivities(*grid);
-      //    }
+      stop_parallel_timing_block();
 
       ++loop;
 
-      if (write_output && every_iteration_output && loop < nloop) {
+      if (write_output && every_iteration_output && loop < nloop_step) {
         writer->write(*grid, loop, params);
       }
     }
 
-    if (log && loop == nloop) {
-      log->write_status("Maximum number of iterations (", nloop,
-                        ") reached, stopping.");
+    if (log) {
+      log->write_status("Done with radiation step.");
     }
 
-    if (hydro_integrator != nullptr) {
-      hydro_integrator->do_hydro_step(*grid, hydro_timestep);
+    hydro_integrator->do_hydro_step(*grid, actual_timestep, serial_timer,
+                                    parallel_timer);
 
-      // write snapshot
-      if (write_output &&
-          hydro_lastsnap * hydro_snaptime < (istep + 1) * hydro_timestep) {
-        writer->write(*grid, hydro_lastsnap, params,
-                      hydro_lastsnap * hydro_snaptime);
-        ++hydro_lastsnap;
-      }
+    // write snapshot
+    // we don't write if this is the last snapshot, because then it is written
+    // outside the integration loop
+    if (write_output && hydro_lastsnap * hydro_snaptime <= current_time &&
+        has_next_step) {
+      writer->write(*grid, hydro_lastsnap, params, current_time);
+      ++hydro_lastsnap;
     }
   }
 
   // write snapshot
   if (write_output) {
-    if (hydro_integrator == nullptr) {
-      writer->write(*grid, nloop, params);
-    } else {
-      writer->write(*grid, hydro_lastsnap, params,
-                    hydro_lastsnap * hydro_snaptime);
-    }
+    writer->write(*grid, hydro_lastsnap, params, hydro_total_time);
   }
 
+  serial_timer.stop();
+  total_timer.stop();
   programtimer.stop();
   if (log) {
+    log->write_status("Total serial time: ",
+                      Utilities::human_readable_time(serial_timer.value()),
+                      ".");
+    log->write_status("Total parallel time: ",
+                      Utilities::human_readable_time(parallel_timer.value()),
+                      ".");
+    log->write_status("Total overall time: ",
+                      Utilities::human_readable_time(total_timer.value()), ".");
     log->write_status("Total program time: ",
                       Utilities::human_readable_time(programtimer.value()),
                       ".");
@@ -455,9 +441,7 @@ int RadiationHydrodynamicsSimulation::do_simulation(CommandLineParser &parser,
   }
   delete writer;
   delete grid;
-  if (hydro_integrator != nullptr) {
-    delete hydro_integrator;
-  }
+  delete hydro_integrator;
   delete temperature_calculator;
   delete continuousspectrum;
   delete spectrum;

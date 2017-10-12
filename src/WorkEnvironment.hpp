@@ -28,11 +28,17 @@
 
 #include "Configuration.hpp"
 
+#include <cstdint>
+
 #ifdef HAVE_OPENMP
 #include <omp.h>
 #endif
 
 #ifdef HAVE_OUTPUT_CYCLES
+#include "Error.hpp"
+#include "Timer.hpp"
+
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #endif
@@ -54,8 +60,9 @@ public:
    * @param max_num_threads Maximum number of threads to use.
    * @return Number of threads that will be available for use.
    */
-  inline static int set_max_num_threads(int max_num_threads) {
-    int num_threads = 1;
+  inline static int_fast32_t set_max_num_threads(int_fast32_t max_num_threads) {
+
+    int_fast32_t num_threads = 1;
 #ifdef HAVE_OPENMP
     if (max_num_threads > 0) {
       omp_set_num_threads(max_num_threads);
@@ -70,11 +77,32 @@ public:
 
 #ifdef HAVE_OUTPUT_CYCLES
     // make sure the jobtimes_*.txt files are empty
-    for (int i = 0; i < num_threads; ++i) {
+    for (int_fast32_t i = 0; i < num_threads; ++i) {
       std::stringstream filename;
       filename << "jobtimes_" << i << ".txt";
       std::ofstream file(filename.str(), std::ofstream::trunc);
     }
+
+    // calibrate the cycle count
+    Timer timer;
+    unsigned int lo, hi;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    uint_fast64_t first_count = ((uint_fast64_t)hi << 32) | lo;
+    timer.start();
+
+    // do some useless work that keeps the cpu busy for a while
+    double result = 0.;
+    for (uint_fast32_t i = 0; i < 1000000; ++i) {
+      double x = 0.01 * i + 0.2;
+      result += std::sqrt(x);
+    }
+
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    uint_fast64_t last_count = ((uint_fast64_t)hi << 32) | lo;
+    timer.stop();
+
+    cmac_warning("Time/CPU cycle: %g",
+                 timer.value() / (last_count - first_count));
 #endif
 
     return num_threads;

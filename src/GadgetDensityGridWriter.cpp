@@ -46,8 +46,7 @@
  */
 GadgetDensityGridWriter::GadgetDensityGridWriter(std::string prefix,
                                                  std::string output_folder,
-                                                 Log *log,
-                                                 unsigned char padding)
+                                                 Log *log, uint_fast8_t padding)
     : DensityGridWriter(output_folder, log), _prefix(prefix),
       _padding(padding) {
 
@@ -77,7 +76,7 @@ GadgetDensityGridWriter::GadgetDensityGridWriter(std::string output_folder,
           params.get_value< std::string >("DensityGridWriter:prefix",
                                           "snapshot"),
           output_folder, log,
-          params.get_value< unsigned char >("DensityGridWriter:padding", 3)) {}
+          params.get_value< uint_fast8_t >("DensityGridWriter:padding", 3)) {}
 
 /**
  * @brief Write the file.
@@ -88,8 +87,9 @@ GadgetDensityGridWriter::GadgetDensityGridWriter(std::string output_folder,
  * written to the file.
  * @param time Simulation time (in s).
  */
-void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
+void GadgetDensityGridWriter::write(DensityGrid &grid, uint_fast32_t iteration,
                                     ParameterFile &params, double time) {
+
   std::string filename = Utilities::compose_filename(
       _output_folder, _prefix, "hdf5", iteration, _padding);
 
@@ -105,24 +105,24 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
   Box<> box = grid.get_box();
   CoordinateVector<> boxsize = box.get_sides();
   HDF5Tools::write_attribute< CoordinateVector<> >(group, "BoxSize", boxsize);
-  int dimension = 3;
-  HDF5Tools::write_attribute< int >(group, "Dimension", dimension);
-  std::vector< unsigned int > flag_entropy(6, 0);
-  HDF5Tools::write_attribute< std::vector< unsigned int > >(
+  int32_t dimension = 3;
+  HDF5Tools::write_attribute< int32_t >(group, "Dimension", dimension);
+  std::vector< uint32_t > flag_entropy(6, 0);
+  HDF5Tools::write_attribute< std::vector< uint32_t > >(
       group, "Flag_Entropy_ICs", flag_entropy);
   std::vector< double > masstable(6, 0.);
   HDF5Tools::write_attribute< std::vector< double > >(group, "MassTable",
                                                       masstable);
-  int numfiles = 1;
-  HDF5Tools::write_attribute< int >(group, "NumFilesPerSnapshot", numfiles);
-  std::vector< unsigned int > numpart(6, 0);
+  int32_t numfiles = 1;
+  HDF5Tools::write_attribute< int32_t >(group, "NumFilesPerSnapshot", numfiles);
+  std::vector< uint32_t > numpart(6, 0);
   numpart[0] = grid.get_number_of_cells();
-  std::vector< unsigned int > numpart_high(6, 0);
-  HDF5Tools::write_attribute< std::vector< unsigned int > >(
+  std::vector< uint32_t > numpart_high(6, 0);
+  HDF5Tools::write_attribute< std::vector< uint32_t > >(
       group, "NumPart_ThisFile", numpart);
-  HDF5Tools::write_attribute< std::vector< unsigned int > >(
-      group, "NumPart_Total", numpart);
-  HDF5Tools::write_attribute< std::vector< unsigned int > >(
+  HDF5Tools::write_attribute< std::vector< uint32_t > >(group, "NumPart_Total",
+                                                        numpart);
+  HDF5Tools::write_attribute< std::vector< uint32_t > >(
       group, "NumPart_Total_HighWord", numpart_high);
   HDF5Tools::write_attribute< double >(group, "Time", time);
   HDF5Tools::close_group(group);
@@ -159,7 +159,10 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
   group = HDF5Tools::create_group(file, "RuntimePars");
   std::string timestamp = Utilities::get_timestamp();
   HDF5Tools::write_attribute< std::string >(group, "Creation time", timestamp);
-  HDF5Tools::write_attribute< unsigned int >(group, "Iteration", iteration);
+  // an uint_fast32_t does not necessarily have the expected 32-bit size, while
+  // we really need a 32-bit variable to write to the file
+  uint32_t uint32_iteration = iteration;
+  HDF5Tools::write_attribute< uint32_t >(group, "Iteration", uint32_iteration);
   HDF5Tools::close_group(group);
 
   // write units, we use SI units everywhere
@@ -192,6 +195,10 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
   for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
     HDF5Tools::create_dataset< double >(
         group, "NeutralFraction" + get_ion_name(i), numpart[0]);
+#ifdef DO_OUTPUT_COOLING
+    HDF5Tools::create_dataset< double >(group, "Cooling" + get_ion_name(i),
+                                        numpart[0]);
+#endif
   }
   if (grid.has_hydro()) {
     HDF5Tools::create_dataset< double >(group, "Density", numpart[0]);
@@ -202,20 +209,25 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
     HDF5Tools::create_dataset< double >(group, "TotalEnergy", numpart[0]);
   }
 
-  const unsigned int blocksize = 10000;
-  const unsigned int numblock =
+  const uint_fast32_t blocksize = 10000;
+  const uint_fast32_t numblock =
       numpart[0] / blocksize + (numpart[0] % blocksize > 0);
-  for (unsigned int iblock = 0; iblock < numblock; ++iblock) {
-    const unsigned int offset = iblock * blocksize;
-    const unsigned int upper_limit = std::min(offset + blocksize, numpart[0]);
-    const unsigned int thisblocksize = upper_limit - offset;
+  for (uint_fast32_t iblock = 0; iblock < numblock; ++iblock) {
+    const uint_fast32_t offset = iblock * blocksize;
+    const uint_fast32_t upper_limit =
+        std::min(offset + blocksize, uint_fast32_t(numpart[0]));
+    const uint_fast32_t thisblocksize = upper_limit - offset;
 
     std::vector< CoordinateVector<> > coords(thisblocksize);
     std::vector< double > ndens(thisblocksize);
     std::vector< double > temp(thisblocksize);
     std::vector< std::vector< double > > nfrac(
         NUMBER_OF_IONNAMES, std::vector< double >(thisblocksize));
-    unsigned int index = 0;
+#ifdef DO_OUTPUT_COOLING
+    std::vector< std::vector< double > > cooling(
+        NUMBER_OF_IONNAMES, std::vector< double >(thisblocksize));
+#endif
+    size_t index = 0;
     for (auto it = grid.begin() + offset; it != grid.begin() + upper_limit;
          ++it) {
       coords[index] = it.get_cell_midpoint() - box.get_anchor();
@@ -225,9 +237,12 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
 
       ndens[index] = ionization_variables.get_number_density();
       temp[index] = ionization_variables.get_temperature();
-      for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
+      for (int_fast32_t i = 0; i < NUMBER_OF_IONNAMES; ++i) {
         const IonName ion = static_cast< IonName >(i);
         nfrac[i][index] = ionization_variables.get_ionic_fraction(ion);
+#ifdef DO_OUTPUT_COOLING
+        cooling[i][index] = ionization_variables.get_cooling(ion);
+#endif
       }
       ++index;
     }
@@ -235,9 +250,13 @@ void GadgetDensityGridWriter::write(DensityGrid &grid, unsigned int iteration,
                                                     offset, coords);
     HDF5Tools::append_dataset< double >(group, "NumberDensity", offset, ndens);
     HDF5Tools::append_dataset< double >(group, "Temperature", offset, temp);
-    for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
+    for (int_fast32_t i = 0; i < NUMBER_OF_IONNAMES; ++i) {
       HDF5Tools::append_dataset< double >(
           group, "NeutralFraction" + get_ion_name(i), offset, nfrac[i]);
+#ifdef DO_OUTPUT_COOLING
+      HDF5Tools::append_dataset< double >(group, "Cooling" + get_ion_name(i),
+                                          offset, cooling[i]);
+#endif
     }
 
     if (grid.has_hydro()) {

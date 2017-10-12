@@ -165,6 +165,7 @@ set(TESTGADGETSNAPSHOTDENSITYFUNCTION_SOURCES
     ../src/CartesianDensityGrid.hpp
     ../src/ChargeTransferRates.cpp
     ../src/CoordinateVector.hpp
+    ../src/CubicSplineKernel.hpp
     ../src/DensityFunction.hpp
     ../src/DensityGrid.cpp
     ../src/DensityValues.hpp
@@ -1051,6 +1052,27 @@ add_unit_test(NAME testDiffuseReemissionHandler
 configure_file(${PROJECT_SOURCE_DIR}/test/probset_testdata.txt
                ${PROJECT_BINARY_DIR}/rundir/test/probset_testdata.txt
                COPYONLY)
+
+## Unit test for TimeLine
+set(TESTTIMELINE_SOURCES
+    testTimeLine.cpp
+
+    ../src/TimeLine.hpp
+)
+add_unit_test(NAME testTimeLine
+              SOURCES ${TESTTIMELINE_SOURCES})
+
+## Unit test for GradientCalculator
+set(TESTGRADIENTCALCULATOR_SOURCES
+    testGradientCalculator.cpp
+
+    ../src/CartesianDensityGrid.cpp
+    ../src/DensityGrid.cpp
+    ../src/GradientCalculator.hpp
+    ../src/HydroBoundaryConditions.hpp
+)
+add_unit_test(NAME testGradientCalculator
+              SOURCES ${TESTGRADIENTCALCULATOR_SOURCES})
 
 ### Python module unit tests ###################################################
 macro(add_python_unit_test)

@@ -26,6 +26,7 @@
 #include "TemperatureCalculator.hpp"
 #include "Abundances.hpp"
 #include "ChargeTransferRates.hpp"
+#include "Configuration.hpp"
 #include "DensityGrid.hpp"
 #include "DensityGridTraversalJobMarket.hpp"
 #include "DensityValues.hpp"
@@ -34,6 +35,7 @@
 #include "PhysicalConstants.hpp"
 #include "RecombinationRates.hpp"
 #include "WorkDistributor.hpp"
+#include <cinttypes>
 #include <cmath>
 
 /**
@@ -63,9 +65,9 @@
  * @param log Log to write logging info to.
  */
 TemperatureCalculator::TemperatureCalculator(
-    bool do_temperature_computation, unsigned int minimum_iteration_number,
+    bool do_temperature_computation, uint_fast32_t minimum_iteration_number,
     double luminosity, const Abundances &abundances, double epsilon_convergence,
-    unsigned int maximum_number_of_iterations, double pahfac, double crfac,
+    uint_fast32_t maximum_number_of_iterations, double pahfac, double crfac,
     double crlim, double crscale, const LineCoolingData &line_cooling_data,
     const RecombinationRates &recombination_rates,
     const ChargeTransferRates &charge_transfer_rates, Log *log)
@@ -129,12 +131,12 @@ TemperatureCalculator::TemperatureCalculator(
     : TemperatureCalculator(
           params.get_value< bool >(
               "TemperatureCalculator:do temperature calculation", false),
-          params.get_value< unsigned int >(
+          params.get_value< uint_fast32_t >(
               "TemperatureCalculator:minimum number of iterations", 3),
           luminosity, abundances,
           params.get_value< double >(
               "TemperatureCalculator:epsilon convergence", 1.e-3),
-          params.get_value< unsigned int >(
+          params.get_value< uint_fast32_t >(
               "TemperatureCalculator:maximum number of iterations", 100),
           params.get_value< double >("TemperatureCalculator:PAH heating factor",
                                      1.),
@@ -374,7 +376,34 @@ void TemperatureCalculator::compute_cooling_and_heating_balance(
   abund[SIV] = abundances.get_abundance(ELEMENT_S) *
                ionization_variables.get_ionic_fraction(ION_S_p2);
 
+#ifdef DO_OUTPUT_COOLING
+  loss = 0.;
+  std::vector< std::vector< double > > lines =
+      line_cooling_data.get_line_strengths(T, ne, abund);
+  std::vector< double > cooling(lines.size());
+  for (size_t i = 0; i < lines.size(); ++i) {
+    cooling[i] = 0.;
+    for (size_t j = 0; j < lines[i].size(); ++j) {
+      cooling[i] += lines[i][j];
+    }
+    cooling[i] *= n;
+    loss += cooling[i];
+  }
+  ionization_variables.set_cooling(ION_C_p1, cooling[CII]);
+  ionization_variables.set_cooling(ION_C_p2, cooling[CIII]);
+  ionization_variables.set_cooling(ION_N_n, cooling[NI]);
+  ionization_variables.set_cooling(ION_N_p1, cooling[NII]);
+  ionization_variables.set_cooling(ION_N_p2, cooling[NIII]);
+  ionization_variables.set_cooling(ION_O_n, cooling[OII]);
+  ionization_variables.set_cooling(ION_O_p1, cooling[OIII]);
+  ionization_variables.set_cooling(ION_Ne_n, cooling[NeII]);
+  ionization_variables.set_cooling(ION_Ne_p1, cooling[NeIII]);
+  ionization_variables.set_cooling(ION_S_p1, cooling[SII]);
+  ionization_variables.set_cooling(ION_S_p2, cooling[SIII]);
+  ionization_variables.set_cooling(ION_S_p3, cooling[SIV]);
+#else
   loss = line_cooling_data.get_cooling(T, ne, abund) * n;
+#endif
 
   // free-free cooling (bremsstrahlung)
 
@@ -393,14 +422,17 @@ void TemperatureCalculator::compute_cooling_and_heating_balance(
 
   // we multiplied Kenny's value with 1.e-12 to convert the densities into m^-3
   // we then multiplied with 0.1 to convert them to J m^-3s^-1
-  // expressions come from Black, J. H. 1981, MNRAS, 197, 553
-  // (http://adsabs.harvard.edu/abs/1981MNRAS.197..553B), table 3
+  // expressions come from Black (1981), table 3
   // valid in the range [5,000 K; 50,000 K]
   // NOTE that the expression for helium is different from that in Kenny's code
   // (it is the same as the commented out expression in Kenny's code)
   const double Lhp =
       2.85e-40 * nenhp * sqrtT * (5.914 - 0.5 * logT + 0.01184 * std::cbrt(T));
   const double Lhep = 1.55e-39 * nenhep * std::pow(T, 0.3647);
+#ifdef DO_OUTPUT_COOLING
+  ionization_variables.set_cooling(ION_H_n, Lhp);
+  ionization_variables.set_cooling(ION_He_n, Lhep);
+#endif
   loss += Lhp + Lhep;
 }
 
@@ -501,14 +533,14 @@ void TemperatureCalculator::calculate_temperature(
 
   // normalize the mean intensity integrals
   double j[NUMBER_OF_IONNAMES];
-  for (int i = 0; i < NUMBER_OF_IONNAMES; ++i) {
+  for (int_fast32_t i = 0; i < NUMBER_OF_IONNAMES; ++i) {
     IonName ion = static_cast< IonName >(i);
     j[i] = jfac * ionization_variables.get_mean_intensity(ion);
   }
 
   // normalize the heating integrals
   double h[NUMBER_OF_HEATINGTERMS];
-  for (int i = 0; i < NUMBER_OF_HEATINGTERMS; ++i) {
+  for (int_fast32_t i = 0; i < NUMBER_OF_HEATINGTERMS; ++i) {
     HeatingTermName heating_term = static_cast< HeatingTermName >(i);
     h[i] = hfac * ionization_variables.get_heating(heating_term);
   }
@@ -519,7 +551,7 @@ void TemperatureCalculator::calculate_temperature(
   // guess, until the difference between cooling and heating drops below a
   // threshold value
   // we enforce upper and lower limits on the temperature of 10^10 and 500 K
-  unsigned int niter = 0;
+  uint_fast32_t niter = 0;
   double gain0 = 1.;
   double loss0 = 0.;
   h0 = 0.;
@@ -576,7 +608,8 @@ void TemperatureCalculator::calculate_temperature(
     }
   }
   if (niter == _maximum_number_of_iterations) {
-    cmac_warning("Maximum number of iterations (%u) reached (temperature: %g, "
+    cmac_warning("Maximum number of iterations (%" PRIuFAST32
+                 ") reached (temperature: %g, "
                  "relative difference cooling/heating: %g, aim: %g)!",
                  niter, T0, std::abs(loss0 - gain0) / gain0,
                  _epsilon_convergence);
@@ -657,8 +690,8 @@ void TemperatureCalculator::calculate_temperature(
  * @param block Block that should be traversed by the local MPI process.
  */
 void TemperatureCalculator::calculate_temperature(
-    unsigned int loop, double totweight, DensityGrid &grid,
-    std::pair< unsigned long, unsigned long > &block) const {
+    uint_fast32_t loop, double totweight, DensityGrid &grid,
+    std::pair< cellsize_t, cellsize_t > &block) const {
 
   if (_do_temperature_computation && loop > _minimum_iteration_number) {
     // get the normalization factors for the ionizing intensity and heating
