@@ -25,6 +25,7 @@
  */
 #ifndef CMILIBRARY_HPP
 #define CMILIBRARY_HPP
+#define CMILIBRARY_TALK
 
 #include <cstddef>
 

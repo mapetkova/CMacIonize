@@ -64,6 +64,12 @@ private:
 
   static double cubic_spline_kernel(double u, double h);
 
+  static double full_integral(double phi, double r0, double R_0, double h);
+
+  static double mass_contribution(const Cell &cell,
+                                  const CoordinateVector<> particle,
+                                  const double h);
+
 public:
   SPHArrayDensityFunction(const double unit_length_in_SI,
                           const double unit_mass_in_SI);

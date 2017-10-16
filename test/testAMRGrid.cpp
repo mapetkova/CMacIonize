@@ -250,70 +250,70 @@ int main(int argc, char **argv) {
                           // 945 = 1 110 110 001
                           {1016, 760, 732, 888, 874, 952, 945}};
   for (unsigned int i = 0; i < 8; ++i) {
-    cmac_status("Testing cell %lu", tests[i][0]);
+    cmac_status("Testing cell %llu", tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_LEFT)->value(),
                 tests[i][1]);
     assert_condition(grid[tests[i][0]].get_ngb(AMRNGBPOSITION_LEFT)->value() ==
                      tests[i][1]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][1]].get_ngb(AMRNGBPOSITION_RIGHT)->value(),
                 tests[i][0]);
     assert_condition(grid[tests[i][1]].get_ngb(AMRNGBPOSITION_RIGHT)->value() ==
                      tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_RIGHT)->value(),
                 tests[i][2]);
     assert_condition(grid[tests[i][0]].get_ngb(AMRNGBPOSITION_RIGHT)->value() ==
                      tests[i][2]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][2]].get_ngb(AMRNGBPOSITION_LEFT)->value(),
                 tests[i][0]);
     assert_condition(grid[tests[i][2]].get_ngb(AMRNGBPOSITION_LEFT)->value() ==
                      tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_FRONT)->value(),
                 tests[i][3]);
     assert_condition(grid[tests[i][0]].get_ngb(AMRNGBPOSITION_FRONT)->value() ==
                      tests[i][3]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][3]].get_ngb(AMRNGBPOSITION_BACK)->value(),
                 tests[i][0]);
     assert_condition(grid[tests[i][3]].get_ngb(AMRNGBPOSITION_BACK)->value() ==
                      tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_BACK)->value(),
                 tests[i][4]);
     assert_condition(grid[tests[i][0]].get_ngb(AMRNGBPOSITION_BACK)->value() ==
                      tests[i][4]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][4]].get_ngb(AMRNGBPOSITION_FRONT)->value(),
                 tests[i][0]);
     assert_condition(grid[tests[i][4]].get_ngb(AMRNGBPOSITION_FRONT)->value() ==
                      tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_BOTTOM)->value(),
                 tests[i][5]);
     assert_condition(
         grid[tests[i][0]].get_ngb(AMRNGBPOSITION_BOTTOM)->value() ==
         tests[i][5]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][5]].get_ngb(AMRNGBPOSITION_TOP)->value(),
                 tests[i][0]);
     assert_condition(grid[tests[i][5]].get_ngb(AMRNGBPOSITION_TOP)->value() ==
                      tests[i][0]);
 
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][0]].get_ngb(AMRNGBPOSITION_TOP)->value(),
                 tests[i][6]);
     assert_condition(grid[tests[i][0]].get_ngb(AMRNGBPOSITION_TOP)->value() ==
                      tests[i][6]);
-    cmac_status("%g should be %lu",
+    cmac_status("%g should be %llu",
                 grid[tests[i][6]].get_ngb(AMRNGBPOSITION_BOTTOM)->value(),
                 tests[i][0]);
     assert_condition(

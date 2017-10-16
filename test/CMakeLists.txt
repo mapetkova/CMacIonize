@@ -53,6 +53,19 @@ endmacro(add_unit_test)
 ### Actual unit test generation ################################################
 ### Add new unit tests below ###################################################
 
+## Unit test for CMILibraryDensity
+set(TESTCMILIBRARYDENSITY_SOURCES
+    testCMILibraryDensity.cpp
+)
+# Call the macro that creates the unit test
+add_unit_test(NAME testCMILibraryDensity
+              SOURCES ${TESTCMILIBRARYDENSITY_SOURCES}
+              LIBS CMILibrary)
+configure_file(${PROJECT_SOURCE_DIR}/test/test_CMI_library_density.param
+               ${PROJECT_BINARY_DIR}/rundir/test/test_CMI_library_denstity.param
+               COPYONLY)
+
+
 ## Unit test for LineCoolingData
 # Create the list of source files for this test
 # This list contains ALL .cpp and .hpp files necessary to make the test work.
